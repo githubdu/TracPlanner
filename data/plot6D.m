@@ -75,7 +75,7 @@ function [ t,pos,vel,acc ] = plot6D(s,mode)
     hold on;grid on;
     ylabel('pos');
     legend('x','y','z','A','B','C');
-    title('ABC不连续是正常的，因为Euler角存在突变奇异点。注意Fig1中姿态是否连续');
+    title('ABC is within [-pi,pi]');
     
     subplot(312)
     hold off;
