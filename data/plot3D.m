@@ -108,4 +108,6 @@ function [ t,pos,vel,acc ] = plot3D(s,mode)
         subplot(313)
         plot(t,acc_d_r,'--');
     end
+
+
 end

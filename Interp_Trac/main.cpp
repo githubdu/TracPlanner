@@ -8,7 +8,15 @@
 
 int main(int argc, char* argv[])
 {	
-	test_pinv();
+
+	test_linprog();
+
+	test_inv(10000);
+
+	test_pinv(10000);
+
+	test_ikine(10000);
+
 
 	testIntp();
 

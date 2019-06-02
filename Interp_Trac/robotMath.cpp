@@ -548,6 +548,21 @@ void M6pN(double M[6][MAX_DOF], double M1[6][6], double M2[6][MAX_DOF], int N)
 }
 
 
+void M6pN(double M[6][6], double M1[6][MAX_DOF],double M2[MAX_DOF][6], int N)
+{
+	for(int i = 0; i < 6; i++)
+	{
+		for(int j = 0; j < 6; j++)
+		{
+			M[i][j] = 0;
+			for(int k = 0; k < N; k++)
+			{
+				M[i][j] += M1[i][k] * M2[k][j];
+			}
+		}
+	}
+}
+
 
 void rot_x(double R[4][4], double t)
 {
@@ -959,16 +974,54 @@ void rpy2matrix(double R[3][3],double rpy[],int type)
 	}
 }
 
-void tr2delta(double delta[6], double T1[4][4], double T[4][4])
+void homogeneous_inv(double invT[4][4], double T[4][4])
 {
-	delta[0] = T1[0][3] - T[0][3]; 
-	delta[1] = T1[1][3] - T[1][3]; 
-	delta[2] = T1[2][3] - T[2][3];
+	double invR[3][3], P[3], invP[3];
 
-	delta[3] = (T1[2][0] - T[2][0])*(T[1][0]) + (T1[2][1] - T[2][1])*(T[1][1]) + (T1[2][2] - T[2][2])*(T[1][2]);
-	delta[4] = (T1[0][0] - T[0][0])*(T[2][0]) + (T1[0][1] - T[0][1])*(T[2][1]) + (T1[0][2] - T[0][2])*(T[2][2]);
-	delta[5] = (T1[1][0] - T[1][0])*(T[0][0]) + (T1[1][1] - T[1][1])*(T[0][1]) + (T1[1][2] - T[1][2])*(T[0][2]);
+	for (int i=0; i<3; i++)
+	{
+		for (int j=0; j<3; j++)
+		{
+			invR[i][j] = T[j][i];
+		}
+		P[i] = T[i][3];
+	}
 
+	M3p3(invP,invR,P);
+
+	for (int i=0; i<3; i++)
+	{
+		for (int j=0; j<3; j++)
+		{
+			invT[i][j] = invR[i][j];
+		}
+		invT[i][3] = -invP[i];
+	}
+
+	invT[3][0] = 0; invT[3][1] = 0;
+	invT[3][2] = 0; invT[3][3] = 1;
+}
+
+void tr2delta(double delta[6], double T1[4][4], double T2[4][4])
+{
+	double invT1[4][4];
+	homogeneous_inv(invT1,T1);
+
+	double TD[4][4];
+	M4p4(TD,invT1,T2);
+
+	delta[0] = TD[0][3];
+	delta[1] = TD[1][3];
+	delta[2] = TD[2][3];
+
+	double R[3][3];
+	homogeneous2rot(R,TD);
+
+	TD[0][0] -= 1.0;
+	TD[1][1] -= 1.0;
+	TD[2][2] -= 1.0;
+
+	skew2vex(delta+3,R);
 }
 
 
@@ -986,7 +1039,146 @@ void tr2delta(double delta[6], double T1[4][4], double T[4][4])
 
 
 
+int inv(double* invA, double* A, int n)
+{
+	double MINIMUM_NUM = 1E-60;
+	double a;
+	double** mAug = (double**)malloc(sizeof(double*)*n);
+	for (int i=0; i<n; i++)
+	{
+		mAug[i] = (double*)malloc(sizeof(double)*n*2);
+	}
 
+	for (int i=0; i<n; i++)
+	{
+		for (int j=0; j<n*2; j++)
+		{
+			if (j < n)
+			{
+				mAug[i][j] = A[i*n+j];//A[i][j];
+			}
+			else
+			{
+				if (i == j - n)
+				{
+					mAug[i][j] = 1.0;
+				}
+				else
+				{
+					mAug[i][j] = 0.0;
+				}
+			}
+		}
+	}
+
+	for (int ii=0; ii<n-1; ii++)		
+	{
+		if (ABS(mAug[ii][ii]) < MINIMUM_NUM)
+		{
+			for (int i=ii+1; i<n; i++)
+			{
+				if (ABS(mAug[i][ii]) > MINIMUM_NUM)
+				{
+					for (int j=0; j<2*n; j++)
+					{
+						mAug[ii][j] = mAug[ii][j] + mAug[i][j];
+						if (ABS(mAug[ii][j]) < MINIMUM_NUM)
+						{
+							mAug[ii][j] = 0;
+						}
+					}
+					break;
+				}
+			}
+
+			if (ABS(mAug[ii][ii]) < MINIMUM_NUM)
+			{
+				DUMP_ERROR("ERR: no inverse exit!\n\n");
+				return -1;
+			}
+		}
+
+		if (ABS(mAug[ii][ii]-1.0) > MINIMUM_NUM)
+		{
+			a = mAug[ii][ii];
+
+			for (int j=0; j<2*n ;j++)
+			{
+				mAug[ii][j] = mAug[ii][j]/a;
+				if (ABS(mAug[ii][j]) < MINIMUM_NUM)
+				{
+					mAug[ii][j] = 0;
+				}
+			}
+		}
+
+		for (int i=ii+1; i<n ;i++)
+		{
+			a = mAug[i][ii];
+			for (int j=ii; j<2*n; j++)
+			{
+				mAug[i][j] = -a*mAug[ii][j]+mAug[i][j];
+				if (ABS(mAug[i][j]) < MINIMUM_NUM)
+				{
+					mAug[i][j] = 0;
+				}
+			}
+		}
+
+	}
+
+	if (ABS(mAug[n-1][n-1]) < MINIMUM_NUM)
+	{
+		DUMP_ERROR("ERR: no inverse exit!!\n");
+		return -1;
+	}
+
+	if (ABS(mAug[n-1][n-1] - 1.0) > MINIMUM_NUM)
+	{
+		a = mAug[n-1][n-1];
+		for (int j=0; j<n*2; j++)
+		{
+			mAug[n-1][j] = mAug[n-1][j]/a;
+			if (ABS(mAug[n-1][j]) < MINIMUM_NUM)
+			{
+				mAug[n-1][j] = 0;
+			}
+		}
+	}
+
+	for (int ii=n-1; ii>0; ii--)
+	{
+		for (int i=ii-1; i>=0; i--)
+		{
+			a = mAug[i][ii];
+			for (int j=0; j<2*n; j++)
+			{
+				mAug[i][j] = -a*mAug[ii][j]+mAug[i][j];
+				if (ABS(mAug[i][j]) < MINIMUM_NUM)
+				{
+					mAug[i][j] = 0.0;
+				}
+			}
+		}
+	}
+
+	// save invP
+	for (int i=0; i<n; i++)
+	{
+		for (int j=0; j<n; j++)
+		{
+			invA[i*n+j] = mAug[i][j+n];
+		}
+	}
+
+	for (int i=0; i<n; i++)
+	{
+		free(mAug[i]);
+	}
+	free(mAug);
+
+	return 0;
+}
 
 
 
@@ -1854,4 +2046,82 @@ int    dluav(double a[],int m,int n,double u[],double v[],double eps,int ka)
 	free(e);
 	free(w);
 	return l;
+}
+
+
+
+
+
+
+
+#include "glpk.h"
+
+int   linprog(double& Z,double X[], double C[], double A[], double B[], double vlb[], double vub[],int m, int n)
+{
+	glp_prob *lp;
+
+	int ia[1+1000], ja[1+1000];
+
+	double ar[1+1000];
+
+	lp = glp_create_prob();
+	if (Z < 0)
+	{
+		glp_set_obj_dir(lp, GLP_MIN);
+	}
+	else
+	{
+		glp_set_obj_dir(lp, GLP_MAX);
+	}
+
+	glp_add_rows(lp, m);
+	for (int i=0; i<m; i++)
+	{
+		glp_set_row_bnds(lp,i+1,GLP_UP,0.0,B[i]);
+	}
+
+	glp_add_cols(lp, n);
+	for (int i=0; i<n; i++)
+	{
+		if(vlb[i] != UNBOUND)
+		{
+			glp_set_col_bnds(lp,i+1, GLP_LO, 0.0, vlb[i]);
+		}
+		if (vub[i] != UNBOUND)
+		{
+			glp_set_col_bnds(lp,i+1, GLP_UP, 0.0, vub[i]);
+		}
+		glp_set_obj_coef(lp,i+1, C[i]);
+	}
+
+	for (int i=0; i<m; i++)
+	{
+		for (int j=0; j<n; j++)
+		{
+			ia[i*n+j+1] = i+1;
+			ja[i*n+j+1] = j+1;
+			ar[i*n+j+1] = A[i*n+j];
+		}
+	}
+
+	glp_load_matrix(lp, m*n, ia, ja, ar);
+
+	glp_smcp smcp;
+	glp_init_smcp(&smcp);
+	smcp.msg_lev = GLP_MSG_ERR;
+	int ret = glp_simplex(lp, &smcp);
+
+	Z = glp_get_obj_val(lp);
+	//DUMP_INFORM("ObjVal: %.4f\n",Z);
+
+	for (int i=0; i<n; i++)
+	{
+		X[i] = glp_get_col_prim(lp,i+1);
+		//DUMP_INFORM("    x%d, %.4f\n",i+1,X[i]);
+	}
+	//DUMP_INFORM("\n\n");
+
+	glp_delete_prob(lp);
+
+	return ret;
 }

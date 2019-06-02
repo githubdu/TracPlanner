@@ -27,7 +27,7 @@ function [ t,pos,vel,acc ] = plotAGV(s,mode)
     plot(pos(:,1),pos(:,2));
     hold on; grid on;
     d = max(0.1,0.01*norm(max(pos(:,1:2))));
-    title('red is the AGV posture, green is the wheel direction');
+    title('红色是车体正方向，绿色是车轮正方向');
 
     for i = linspace(1,size(pos,1),100);
         k = floor(i);
@@ -70,7 +70,7 @@ function [ t,pos,vel,acc ] = plotAGV(s,mode)
     hold on;grid on;
     ylabel('pos');
     legend('x','y','A','W');
-    title('AW is within [-pi,pi]');
+    title('AW不连续是正常的。注意Fig1中姿态是否连续');
     
     subplot(312)
     hold off;

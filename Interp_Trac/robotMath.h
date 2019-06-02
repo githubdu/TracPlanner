@@ -34,6 +34,13 @@
 #define sign(x) (((x) > 0) - ((x) < 0))
 #endif
 
+#ifndef UNBOUND
+#define UNBOUND	(0xFFFFFFFF)
+#endif
+
+
+
+
 
 /// Returns X!
 int factorial(int x);
@@ -128,6 +135,9 @@ void M6pN(double V[6], double M[6][MAX_DOF], double V2[MAX_DOF], int N);
 /// matrix multiplication: M(6xN) = M1(6x6)*M2(6xN)
 void M6pN(double M[6][MAX_DOF], double M1[6][6], double M2[6][MAX_DOF], int N);
 
+/// matrix multiplication: M(6x6) = M1(6xN)*M2(Nx6)
+void M6pN(double M[6][6], double M1[6][MAX_DOF],double M2[MAX_DOF][6], int N);
+
 
 
 
@@ -191,6 +201,9 @@ void matrix2rpy(double rpy[],double R[3][3],int type=0);
 /*	1, XYZ order, R = rotx(yaw) * roty(pitch) * rotz(roll);*/
 void rpy2matrix(double R[3][3],double rpy[],int type=0);
 
+/// homogeneous matrix inverse
+void homogeneous_inv(double invT[4][4], double T[4][4]);
+
 /// homogeneous matrix to differential motion
 void tr2delta(double delta[6], double T1[4][4], double T[4][4]);
 
@@ -198,8 +211,15 @@ void tr2delta(double delta[6], double T1[4][4], double T[4][4]);
 
 
 
-
+int inv(double* inv_a, double* a, int m);
 
 int pinv(double* pinv_a, double* a, int m, int n);
+
+
+
+
+
+
+int linprog(double& Z,double X[], double C[], double A[], double B[], double vlb[], double vub[],int m, int n);
 
 #endif // !ROBOTMATH_H_

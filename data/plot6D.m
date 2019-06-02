@@ -75,7 +75,7 @@ function [ t,pos,vel,acc ] = plot6D(s,mode)
     hold on;grid on;
     ylabel('pos');
     legend('x','y','z','A','B','C');
-    title('ABC is within [-pi,pi]');
+    title('ABC不连续是正常的，因为Euler角存在突变奇异点。注意Fig1中姿态是否连续');
     
     subplot(312)
     hold off;
@@ -129,5 +129,19 @@ function [ t,pos,vel,acc ] = plot6D(s,mode)
 end
 
 function R = rpy2matrix(rpy)
-    R = rotz(rpy(1))*roty(rpy(2))*rotx(rpy(3));
+    g = rpy(1); b = rpy(2); a = rpy(3);
+
+    R = zeros(3);
+
+    R(1,1) = cos(a)*cos(b);
+    R(1,2) = cos(a)*sin(b)*sin(g) - sin(a)*cos(g); 
+    R(1,3) = cos(a)*sin(b)*cos(g) + sin(a)*sin(g);
+
+    R(2,1) = sin(a)*cos(b);
+    R(2,2) = sin(a)*sin(b)*sin(g) + cos(a)*cos(g); 
+    R(2,3) = sin(a)*sin(b)*cos(g) - cos(a)*sin(g);
+
+    R(3,1) = -sin(b);
+    R(3,2) = cos(b)*sin(g);				
+    R(3,3) = cos(b)*cos(g);
 end

@@ -9,12 +9,13 @@
 
 
 
+void test_linprog();
 
+void test_inv(int cycles);
 
+void test_pinv(int cycles);
 
-void test_pinv();
-
-
+void test_ikine(int cycle);
 
 
 
@@ -46,6 +47,15 @@ void test_planner6D_bspline();
 void test_planner6D_rotation();
 
 
+
+
+void testPlannerOpt();
+void test_plannerOpt_redundant();
+void test_plannerOpt_nonredundant();
+
+
+
+
 void testPlannerAgv();
 void test_plannerAgv_line();
 void test_plannerAgv_circle();
@@ -54,12 +64,5 @@ void test_plannerAgv_turning();
 void test_plannerAgv_rotation();
 
 
-
-
-
-
-
-
-void testPlannerOpt();
 
 #endif // !TEST_H_

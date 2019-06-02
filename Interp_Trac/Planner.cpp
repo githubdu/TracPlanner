@@ -2760,18 +2760,32 @@ SWITCH_PLANNERS://-------------------------------------------------
 PlannerOpt::PlannerOpt()
 {
 	_step = PLAN_CYCLE;
-	memset(_flangeMask,1,sizeof(_flangeMask));
 	memset(_jointUpBound,3,sizeof(_jointUpBound));
 	memset(_jointLowBound,-3,sizeof(_jointLowBound));
 	memset(_lastTargetJointVel,0,sizeof(_lastTargetJointVel));
 	memset(_lastTargetFlangePos,0,sizeof(_lastTargetFlangePos));
 	memset(_lastTargetFlangeVel,0,sizeof(_lastTargetFlangeVel));
+
+	_flangeMask[0] = 1;
+	_flangeMask[1] = 1;
+	_flangeMask[2] = 1;
+	_flangeMask[3] = 1;
+	_flangeMask[4] = 1;
+	_flangeMask[5] = 1;
 }
 
 
 PlannerOpt::~PlannerOpt()
 {
 
+}
+
+
+int PlannerOpt::setKine(Kine kine)
+{
+	_kine = kine;
+
+	return 0;
 }
 
 
@@ -2832,6 +2846,9 @@ int PlannerOpt::_getJointVelLimit(double velUpLim[],double velLowLim[])
 
 			velUpLim[i] = MIN(MIN(tmp1,tmp2),tmp3);    
 		}
+
+		velUpLim[i] = MIN(velUpLim[i],_lastTargetJointVel[i] + _jointAccLimit[i]*_step*2.0);
+		velLowLim[i] = MAX(velLowLim[i],_lastTargetJointVel[i] - _jointAccLimit[i]*_step*2.0);
 	}
 
 	return PLANNER_SUCCEED;
@@ -2978,126 +2995,44 @@ int PlannerOpt::_getTarget(double nextPos[], double nextVel[], double nextAcc[])
 
 int PlannerOpt::_projectMotion(double nextPos[], double nextVel[],double nextAcc[])
 {
-	// limits of joint velocity-----------------------------
-	double QVL[MAX_DOF],QVU[MAX_DOF];
-	_getJointVelLimit(QVU,QVL);
-
-	// Jacobi matrix and its inverse------------------------
-	double Jacob[6][MAX_DOF], invJacob[6][MAX_DOF];
-	_kine.Jacob0(Jacob,_lastTracTargetJoint);
-
-	double tmpJacob[6*MAX_DOF], tmpPinvJacob[MAX_DOF*6];
-	for (int i=0; i<_dof; i++)
-	{
-		for (int j=0; j<6; j++)
-		{
-			tmpJacob[i*_dof+j] = Jacob[i][j];
-		}
-	}
-	pinv(tmpPinvJacob,tmpJacob,_dof,6);
-	for (int i=0; i<6; i++)
-	{
-		for (int j=0; j<_dof; j++)
-		{
-			invJacob[i][j] = tmpPinvJacob[i*6+j];
-		}
-	}
-
-	// get scaling factor-----------------------------------
+	int sumMask = 0;
 	double scales = 1.0;
 	double jointVel[MAX_DOF];
-	while(true)
+	for (int i=0; i<6; i++)
 	{
-		for(int i = 0; i < 6; i++)
+		if (_flangeMask[i] != 0)
 		{
-			jointVel[i] = 0;
-			for(int k = 0; k < 6; k ++)
-			{
-				jointVel[i] += invJacob[i][k]*nextVel[k]*scales;
-			}
+			sumMask++;
 		}
-
-		int index = _dof;
-		double maxLimit = 0;
-		for (int i=0; i<_dof; i++)
+	}
+	if (_dof <= sumMask)
+	{
+		if(_scaleOptForNonRedundant(scales,jointVel,nextVel))
 		{
-			double tmpLimit = MAX(MAX(jointVel[i]-QVU[i]-ALMOST_ZERO,QVL[i]-jointVel[i]-ALMOST_ZERO),maxLimit);
-			if (tmpLimit > maxLimit)
-			{
-				index = i;
-				maxLimit = tmpLimit;
-			}
+			_plannerState = ERR_PLAN_FAILED;
+			return _plannerState;
 		}
-
-		if (index < _dof)
+	}
+	else
+	{
+		if (_scaleOptForRedundant(scales,jointVel,nextVel))
 		{
-			double Smin[MAX_DOF] = {0};
-			double Smax[MAX_DOF] = {0};
-			for (int i=0; i<_dof; i++)
-			{
-				if (ABS(jointVel[i]) > ALMOST_ZERO )
-				{
-					Smin[i] = MIN(QVL[i]/jointVel[i],QVU[i]/jointVel[i]);
-					Smax[i] = MAX(QVL[i]/jointVel[i],QVU[i]/jointVel[i]);
-				}
-				else
-				{
-					Smax[i] = 1E20;
-					Smin[i] = -1E20;
-				}
-			}
-			double smax = 1E21;
-			double smin = -1E21;
-			for (int i=0; i<_dof; i++)
-			{
-				if (Smax[i] < smax)
-				{
-					smax = Smax[i];
-				}
-				if (Smin[i] > smin)
-				{
-					smin = Smin[i];
-				}
-			}
-			if (smin > smax || smax < 0 || smin > 1 + ALMOST_ZERO)
-			{
-				DUMP_ERROR("ERR: found singularity !!!\n");
-				_plannerState = ERR_PLAN_FAILED;
-				return _plannerState;
-			}
-			else
-			{
-				scales = MIN(smax-ACCURACY_FACTOR,1.0);
-			}
-		}
-		else
-		{
-			break;
+			_plannerState = ERR_PLAN_FAILED;
+			return _plannerState;
 		}
 	}
 
-	// update time axis-------------------------------------
-	if (scales < 1.0 - ALMOST_ZERO)
+	// update
+	for (int i=0; i<6; i++)
 	{
-		_plannerStartTime -= (1.0 + ALMOST_ZERO - scales)*(_step/1000.0);
-
-		for (int i=0; i<6; i++)
-		{
-			nextVel[i] = nextVel[i]*scales;
-			nextAcc[i] = (nextVel[i] - _lastTargetFlangeVel[i])/(_step/1000.0);
-			nextPos[i] = _lastTargetFlangePos[i] + nextVel[i]*(_step/1000.0) + 0.5*nextAcc[i]*(_step/1000.0)*(_step/1000.0);
-		}
+		nextVel[i] = nextVel[i]*scales;
+		nextAcc[i] = (nextVel[i] - _lastTargetFlangeVel[i])/(_step/1000.0);
+		nextPos[i] = _lastTargetFlangePos[i] + nextVel[i]*(_step/1000.0) + 0.5*nextAcc[i]*(_step/1000.0)*(_step/1000.0);
 	}
 
-	for (int i=0; i<_dof; i++)
-	{
-		_lastTargetJointVel[i] = jointVel[i];
-	}
-
-	double joint[MAX_DOF];
-	_kine.Ikine(joint,nextPos,_lastTracTargetJoint);
-	memcpy(_lastTracTargetJoint,joint,sizeof(joint));
-
+	memcpy(_lastTargetJointVel,jointVel,sizeof(jointVel));
+	_kine.Ikine(_lastTracTargetJoint,nextPos,_lastTracTargetJoint);
+	_plannerStartTime -= (1.0 + ALMOST_ZERO - scales)*(_step/1000.0);
 	memcpy(_lastTargetFlangePos,nextPos,sizeof(_lastTargetFlangePos));
 	memcpy(_lastTargetFlangeVel,nextVel,sizeof(_lastTargetFlangeVel));
 
@@ -3186,6 +3121,220 @@ int PlannerOpt::setJointRange(int dof, double jointUpBound[], double jointLowBou
 	_dof = dof;
 	memcpy(_jointUpBound,jointUpBound,sizeof(double)*dof);
 	memcpy(_jointLowBound,jointLowBound,sizeof(double)*dof);
+
+	return PLANNER_SUCCEED;
+}
+
+
+int PlannerOpt::_scaleOptForRedundant(double& scales, double jointVel[],double nextVel[])
+{
+	int sumMask = 0;
+	for (int i=0; i<6; i++)
+	{
+		if (_flangeMask[i] != 0)
+		{
+			sumMask++;
+		}
+	}
+
+	double qv_min[MAX_DOF],qv_max[MAX_DOF];
+	_getJointVelLimit(qv_max,qv_min);
+
+	double jacbo[6][MAX_DOF];
+	_kine.Jacob0(jacbo,_lastTracTargetJoint);
+
+	double invJacob[MAX_DOF][6];
+	_kine.InvJacob0(invJacob,_lastTracTargetJoint);
+
+	//-----
+	for(int i = 0; i < _dof; i++)
+	{
+		jointVel[i] = 0;
+		for(int k = 0; k < 6; k ++)
+		{
+			jointVel[i] += invJacob[i][k]*nextVel[k]*scales*_flangeMask[k];
+		}
+	}
+
+	//------
+	int indexMap[6];
+	double C[6] = {0};
+	double At[MAX_DOF][6];
+	for (int i=0; i<_dof; i++)
+	{			
+		C[0] = -1.0;
+		At[i][0] = 0;
+		for (int j=0; j<6; j++)
+		{
+			At[i][0] = invJacob[i][j]*nextVel[j]*_flangeMask[j];
+		}
+
+		int index = 0;
+		for (int j=0; j<6; j++)
+		{
+			if (_flangeMask[j] == 0)
+			{
+				At[i][index+1] = invJacob[i][j];
+				indexMap[index] = j;
+				index++;
+			}
+		}
+	}
+
+	//-----
+	double B[2*MAX_DOF];
+	double A[2*MAX_DOF*6];
+	double Am[2*MAX_DOF][6];
+	for (int i=0; i<_dof; i++)
+	{
+		for (int j=0; j<6; j++)
+		{
+			if (j <= sumMask)
+			{
+				Am[i][j] = At[i][j];
+				Am[i+_dof][j] = -At[i][j];
+			}
+			else
+			{
+				Am[i][j] = 0;
+				Am[i+_dof][j] = 0;
+			}
+		}
+		B[i] = qv_max[i];
+		B[i+_dof] = -qv_min[i];
+	}
+	for (int i=0; i<_dof*2; i++)
+	{
+		for (int j=0; j<= sumMask; j++)
+		{
+			A[i*(sumMask+1)+j] = Am[i][j];
+		}
+	}
+
+	//-----
+	double vlb[6]={0}, vub[6]={0}; 
+	vub[0] = 1.0 + ACCURACY_FACTOR;
+
+	for (int i=1; i<=sumMask; i++)
+	{
+		for (int j=0; j<_dof; j++)
+		{
+			int tmp = indexMap[i-1];
+			double data = jacbo[tmp][j];
+			if (data > 0 )
+			{
+				vlb[i] += data*(jointVel[j] - _jointAccLimit[j]*_step/1000.0);
+				vub[i] += data*(jointVel[j] + _jointAccLimit[j]*_step/1000.0);
+			}
+			else
+			{
+				vlb[i] += data*(jointVel[j] + _jointAccLimit[j]*_step/1000.0);
+				vub[i] += data*(jointVel[j] - _jointAccLimit[j]*_step/1000.0);
+			}
+		}
+	}
+
+	// linear programming
+	double Z=-1,X[7];
+	if (linprog(Z,X,C,A,B,vlb,vub,_dof*2,7-sumMask))
+	{
+		DUMP_ERROR("ERR: linprog can NOT get a valid value!\n");
+		_plannerState = ERR_PLAN_FAILED;
+		return _plannerState;
+	}
+	else
+	{
+		scales = X[0];
+		for (int i=0; i<_dof; i++)
+		{
+			jointVel[i] = 0;
+			for (int j=0; j<7-sumMask; j++)
+			{
+				jointVel[i] += At[i][j]*X[j];
+			}
+		}
+	}
+
+	return PLANNER_SUCCEED;
+}
+
+
+int PlannerOpt::_scaleOptForNonRedundant(double& scales, double jointVel[],double nextVel[])
+{
+	double qv_min[MAX_DOF],qv_max[MAX_DOF];
+	_getJointVelLimit(qv_max,qv_min);
+
+	double invJacob[MAX_DOF][6];
+	_kine.InvJacob0(invJacob,_lastTracTargetJoint);
+
+	while(true)
+	{
+		for(int i = 0; i < _dof; i++)
+		{
+			jointVel[i] = 0;
+			for(int k = 0; k < 6; k ++)
+			{
+				jointVel[i] += invJacob[i][k]*nextVel[k]*scales*_flangeMask[k];
+			}
+		}
+
+		int index = _dof;
+		double maxLimit = 0;
+		for (int i=0; i<_dof; i++)
+		{
+			double tmpLimit = MAX(MAX(jointVel[i]-qv_max[i]-ALMOST_ZERO,qv_min[i]-jointVel[i]-ALMOST_ZERO),maxLimit);
+			if (tmpLimit > maxLimit)
+			{
+				index = i;
+				maxLimit = tmpLimit;
+			}
+		}
+
+		if (index < _dof)
+		{
+			double Smin[MAX_DOF] = {0};
+			double Smax[MAX_DOF] = {0};
+			for (int i=0; i<_dof; i++)
+			{
+				if (ABS(jointVel[i]) > ALMOST_ZERO )
+				{
+					Smin[i] = MIN(qv_min[i]/jointVel[i],qv_max[i]/jointVel[i]);
+					Smax[i] = MAX(qv_min[i]/jointVel[i],qv_max[i]/jointVel[i]);
+				}
+				else
+				{
+					Smax[i] = 1E20;
+					Smin[i] = -1E20;
+				}
+			}
+			double smax = 1E21;
+			double smin = -1E21;
+			for (int i=0; i<_dof; i++)
+			{
+				if (Smax[i] < smax)
+				{
+					smax = Smax[i];
+				}
+				if (Smin[i] > smin)
+				{
+					smin = Smin[i];
+				}
+			}
+			if (smin > smax || smax < 0 || smin > 1 + ALMOST_ZERO)
+			{
+				DUMP_ERROR("ERR: found singularity !!!\n");
+				return ERR_PLAN_FAILED;
+			}
+			else
+			{
+				scales = MIN(smax-ACCURACY_FACTOR,1.0);
+			}
+		}
+		else
+		{
+			break;
+		}
+	}
 
 	return PLANNER_SUCCEED;
 }

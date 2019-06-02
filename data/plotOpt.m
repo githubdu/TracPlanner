@@ -1,4 +1,4 @@
-function [ t,pos,vel] = plotOpt(s)
+function [ t,pos,vel] = plotOpt(s,dof)
 
 
     D = load(s);
@@ -7,8 +7,8 @@ function [ t,pos,vel] = plotOpt(s)
     
     pos = D(:,2:7);
     vel = D(:,8:13);
-    jpos = D(:,14:19);
-    jvel = D(:,20:25);
+    jpos = D(:,14:14+dof-1);
+    jvel = D(:,14+dof:14+dof+dof-1);
 
     figure(1)
     hold off;
@@ -18,7 +18,7 @@ function [ t,pos,vel] = plotOpt(s)
     d = max(0.1,0.01*norm(max(pos)));
     xlabel('x'); ylabel('y'); zlabel('z');
 
-    for i = linspace(1,size(pos,1),100);
+    for i = linspace(1,size(pos,1),100)
         k = floor(i);
         R = rpy2matrix(pos(k,4:6));
         T = R*eye(3);
@@ -47,5 +47,19 @@ function [ t,pos,vel] = plotOpt(s)
 end
 
 function R = rpy2matrix(rpy)
-    R = rotx(rpy(3))*roty(rpy(2))*rotz(rpy(1));
+    g = rpy(1); b = rpy(2); a = rpy(3);
+
+    R = zeros(3);
+
+    R(1,1) = cos(a)*cos(b);
+    R(1,2) = cos(a)*sin(b)*sin(g) - sin(a)*cos(g); 
+    R(1,3) = cos(a)*sin(b)*cos(g) + sin(a)*sin(g);
+
+    R(2,1) = sin(a)*cos(b);
+    R(2,2) = sin(a)*sin(b)*sin(g) + cos(a)*cos(g); 
+    R(2,3) = sin(a)*sin(b)*cos(g) - cos(a)*sin(g);
+
+    R(3,1) = -sin(b);
+    R(3,2) = cos(b)*sin(g);				
+    R(3,3) = cos(b)*cos(g);
 end

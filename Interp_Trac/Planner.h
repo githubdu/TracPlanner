@@ -456,12 +456,16 @@ public:
 	~PlannerOpt();
 
 public:
+	int setKine(Kine kine);
 	int setFlangeMask(int flangeMask[6]);
 
 private:
 	int _getJointVelLimit(double velUpLim[],double velLowLim[]);
 	int	_getTarget(double nextPos[], double nextVel[], double nextAcc[]);
 	int _projectMotion(double nextPos[], double nextVel[],double nextAcc[]);
+	int _scaleOptForRedundant(double& scales, double jointVel[],double nextVel[]);
+	int _scaleOptForNonRedundant(double& scales, double jointVel[],double nextVel[]);
+
 
 public:
 	int updateCurrentJoint(int dof, double currentJointAngle[]);
@@ -478,7 +482,7 @@ private:
 	int	_step;
 	Kine _kine;
 
-	int    _flangeMask[6];		// redundant configuration, for optimization, not used yet.
+	int    _flangeMask[6];
 
 	double _jointUpBound[MAX_DOF];
 	double _jointLowBound[MAX_DOF];
