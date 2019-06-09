@@ -353,9 +353,15 @@ public:
 
 public:
 	int   initiate();
+	int   deInitiate();
+	int   getTracType();
 	int   getUnfinishedBsplineIndex();
+	int   skipToPlannerTime(double time);
 	int   getUnfinishedCircleCenterAngle(double& angle);
+	int   getTargetTurnOfNextMotionOfFlange(double& turn);
 	int   getUnfinishedCircleMiddlePoint(double midPoint[]);
+	int   getUnfinishedBlenderMiddlePoint(double midPoint[]);
+	int   getStartAndSwitchTime(double& startTime, double& switchTime);
 
 public:
 	int stop();
@@ -372,15 +378,15 @@ public:
 
 	int setCartesianLimits(double tvl,double tal,double tjl,double rvl,double ral,double rjl);
 
-	int moveB(double targetPos[][3], int pNum, double refVel, double zArea=0, int zType=0, bool rel=false, double refTime=0);
+	int moveB(double targetPos[][3], int pNum, double refVel, double zArea=0, int zType=0, bool rel=false, double refTime=0, double turnTime=0);
 	
-	int moveR(double targetPos[], double refDir, double refVel, double refAcc=1.0, double refJerk=1.0, int rCycle=0, bool rel=false, double refTime=0);
+	int moveR(double targetPos[], double refDir, double refVel, double refAcc=1.0, double refJerk=1.0, int rCycle=0, bool rel=false, double refTime=0, double turnTime=0);
 
-	int moveL(double targetPos[3], double refVel, double refAcc=1.0, double refJerk=1.0, double zArea=0, int zType=0, int rCycle=0, bool rel=false, double refTime=0);
+	int moveL(double targetPos[3], double refVel, double refAcc=1.0, double refJerk=1.0, double zArea=0, int zType=0, int rCycle=0, bool rel=false, double refTime=0, double turnTime=0);
 
-	int moveC(double targetPos[3], double middlePos[2], double refVel, double refAcc=1.0, double refJerk=1.0, double zArea=0, int zType=0, int cCycle=0, int rCycle=0, bool rel=false,double refTime=0);
+	int moveC(double targetPos[3], double middlePos[2], double refVel, double refAcc=1.0, double refJerk=1.0, double zArea=0, int zType=0, int cCycle=0, int rCycle=0, bool rel=false,double refTime=0, double turnTime=0);
 
-	int moveC(double centerPos[2], double centerAngle, double targetA, double refVel, double refAcc=1.0,double refJerk=1.0, double zArea=0, int zType=0, int rCycle=0, bool rel=false,double refTime=0);
+	int moveC(double centerPos[2], double centerAngle, double targetA, double refVel, double refAcc=1.0,double refJerk=1.0, double zArea=0, int zType=0, int rCycle=0, bool rel=false,double refTime=0, double turnTime=0);
 
 private:
 	int	_moveZ();
@@ -440,10 +446,12 @@ private:
 	double		_lastTracTargetTcpPos[6];
 	double		_lastTracTargetTurnOfFlange;
 	double		_targetTurnOfNextMotionOfFlange;
+	double		_refTurnTimeOfNextMotionOfFlange;
 
 	int			_newPointIndexAfterStop;
 	double		_newCenterAngleAfterStop;
 	double		_newMiddlePointAfterStop[TRANS_D];
+	double		_newBlenderPointAfterStop[TRANS_D+ROTATE_D];
 };
 
 

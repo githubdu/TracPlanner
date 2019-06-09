@@ -1345,14 +1345,20 @@ STOP_TRAC_PLANNER:
 		return ERR_PLAN_FAILED;
 	}
 
+	if (tracBspline == _tracPtr->getType())
+	{
+		_newPointIndexAfterStop = _prevBsplinePlanner.getNowPointIndexAfterStop();
+	}
+
 	if (tracCircle == _tracPtr->getType())
 	{
 		_newCenterAngleAfterStop = _prevCirclePlanner.getNewCenterAngleAndMiddlePointAfterStop(_newMiddlePointAfterStop);
 	}
 
-	if (tracBspline == _tracPtr->getType())
+	if (tracBlender == _tracPtr->getType())
 	{
-		_newPointIndexAfterStop = _prevBsplinePlanner.getNowPointIndexAfterStop();
+		_prevRotPlanner.getTarget(_newBlenderPointAfterStop+TRANS_D);
+		(_blendPlanner.getPrevTrac())->getTarget(_newBlenderPointAfterStop);
 	}
 
 	_plannerSwitchTime = MAX(_tracPtr->getTargetTime(),_rotPtr->getTargetTime());
@@ -1430,6 +1436,7 @@ int PlannerAgv::_moveZ()
 
 		_plannerSwitchTime = _plannerStartTime + _turningPlanner.getDuration();
 		_plannerSwitchTime = MAX(_plannerSwitchTime, _plannerStartTime + TURNING_TIME);
+		_plannerSwitchTime = MAX(_plannerSwitchTime, _refTurnTimeOfNextMotionOfFlange);
 	}
 	else
 	{
@@ -1464,20 +1471,32 @@ int PlannerAgv::initiate()
 	_plannerSwitchTime = 0;
 
 	_tracType = NORMAL_TRAC;
-
-	_isPostPlannerPlanned = false;
-
 	_plannerState = PLANNER_DONE;
 	_blenderState = PLANNER_NOZONE;
 
+	_isPostPlannerPlanned = false;
+
 	_lastTracTargetTurnOfFlange = 0;
 	_targetTurnOfNextMotionOfFlange = 0;
+	_refTurnTimeOfNextMotionOfFlange = 0;
 
 	_lastTracRefToolInv.cartesianZero();
 
 	memset(_lastTracRefTool,0,sizeof(_lastTracRefTool));
 
 	return PLANNER_SUCCEED;
+}
+
+
+int PlannerAgv::deInitiate()
+{
+	return PLANNER_SUCCEED;
+}
+
+
+int PlannerAgv::getTracType()
+{
+	return _tracType;
 }
 
 
@@ -1625,7 +1644,7 @@ int PlannerAgv::rePlan(double refVel)
 
 					if (_tracPtr->getTargetTime() - TIME_SCALE_MS / 1000.0 - _rotPtr->getStartTime() > _rotPtr->getDuration())
 					{
-						//pRotPtr->scaleToDuration(pTracPtr->getTargetTime() - TIME_SCALE_MS / 1000.0 - pRotPtr->getStartTime());  /// ???? something is wrong !!!
+						//pRot.scaleToDuration(pTrac.getTargetTime() - TIME_SCALE_MS / 1000.0 - pRot.getStartTime());  /// ???? something is wrong !!!
 						DUMP_INFORM("rotDuration:%.4f    newDuration:%.4f\n", _rotPtr->getDuration(), _tracPtr->getTargetTime() - TIME_SCALE_MS / 1000.0 - _rotPtr->getStartTime());
 					}
 				}
@@ -1669,6 +1688,13 @@ int PlannerAgv::rePlan(double refVel)
 int PlannerAgv::getUnfinishedBsplineIndex()
 {
 	return _newPointIndexAfterStop;
+}
+
+
+int PlannerAgv::skipToPlannerTime(double time)
+{
+	_plannerStartTime = time;
+	return PLANNER_SUCCEED;
 }
 
 
@@ -1725,17 +1751,42 @@ int PlannerAgv::moveT(double targetW,bool rel, double refTime)
 }
 
 
+int PlannerAgv::getTargetTurnOfNextMotionOfFlange(double& turn)
+{
+	turn = _targetTurnOfNextMotionOfFlange;
+
+	return PLANNER_SUCCEED;
+}
+
+
 int PlannerAgv::getUnfinishedCircleMiddlePoint(double midPoint[])
 {
 	if (midPoint == nullptr)
 	{
-		DUMP_ERROR("ERR: the input ptr is invalid in <Planner6D::getUnfinishedCircleMiddlePoint>\n");
+		DUMP_ERROR("ERR: the input ptr is invalid in <PlannerAgv::getUnfinishedCircleMiddlePoint>\n");
 
 		return -1;
 	}
 
-	midPoint[0] = _newMiddlePointAfterStop[0];
-	midPoint[1] = _newMiddlePointAfterStop[1];
+	midPoint[TARGET_X] = _newMiddlePointAfterStop[TARGET_X];
+	midPoint[TARGET_Y] = _newMiddlePointAfterStop[TARGET_Y];
+
+	return PLANNER_SUCCEED;
+}
+
+
+int PlannerAgv::getUnfinishedBlenderMiddlePoint(double midPoint[])
+{
+	if (midPoint == nullptr)
+	{
+		DUMP_ERROR("ERR: the input ptr is invalid in <PlannerAgv::getUnfinishedBlenderMiddlePoint>\n");
+
+		return -1;
+	}
+
+	midPoint[TARGET_X] = _newBlenderPointAfterStop[TARGET_X];
+	midPoint[TARGET_Y] = _newBlenderPointAfterStop[TARGET_Y];
+	midPoint[TARGET_A] = _newBlenderPointAfterStop[ROT_INDEX-TRANS_D];
 
 	return PLANNER_SUCCEED;
 }
@@ -1756,17 +1807,17 @@ int PlannerAgv::updateCurrentPos(double currentPos[], double refTool[])
 	}
 
 	double refCurrentPos[6] = {0};
-	refCurrentPos[0] = currentPos[TARGET_X];
-	refCurrentPos[1] = currentPos[TARGET_Y];
-	refCurrentPos[ROT_INDEX-TRANS_D] = currentPos[TARGET_A];
+	refCurrentPos[TARGET_X] = currentPos[TARGET_X];
+	refCurrentPos[TARGET_Y] = currentPos[TARGET_Y];
+	refCurrentPos[ROT_INDEX] = currentPos[TARGET_A];
 
 	// check tool
 	bool sameTool = true;
 	if (refTool != nullptr)
 	{
 		double tool[6] = {0};
-		tool[0] = refTool[0];
-		tool[1] = refTool[1];
+		tool[TARGET_X] = refTool[TARGET_X];
+		tool[TARGET_Y] = refTool[TARGET_Y];
 		tool[ROT_INDEX] = refTool[TARGET_A];
 
 		for (int i = 0; i < 6; i++)
@@ -1835,37 +1886,10 @@ int PlannerAgv::_transferAccToFlange(double nextVel[6], double nextAcc[6])
 }
 
 
-int PlannerAgv::_getTargetTurnOfFlange(double&targetTurn, TRAC* tPtr, TRAC* rPtr)
+int PlannerAgv::getStartAndSwitchTime(double& startTime, double& switchTime)
 {
-	double nextPos[6] = {0};
-	double nextVel[6] = {0};
-
-	tPtr->pos(TIME_SCALE_MS/1000.0,nextPos);
-	tPtr->vel(TIME_SCALE_MS/1000.0,nextVel);
-
-	rPtr->pos(TIME_SCALE_MS/1000.0,nextPos+TRANS_D);
-	rPtr->vel(TIME_SCALE_MS/1000.0,nextVel+TRANS_D);
-
-	double direc[3] = {0};
-	double tracVelInTool[3] = {0};
-	_lastTracRefToolInv.getPos(direc);
-
-	cross3(tracVelInTool,nextVel+TRANS_D ,direc);
-
-	double matrix[3][3] = {{0}};
-	rpy2matrix(matrix,nextPos+TRANS_D);
-
-	double tracVelInWord[3] = {0};
-	M3p3(tracVelInWord,matrix,tracVelInTool);
-
-	nextVel[0] += tracVelInWord[0];
-	nextVel[1] += tracVelInWord[1];
-	nextVel[2] += tracVelInWord[2];
-
-	targetTurn = headingDirectionIn2D(nextVel,_lastTracTargetTurnOfFlange);
-
-	return 0;
-
+	startTime = _plannerStartTime;
+	switchTime = _plannerSwitchTime;
 
 	return PLANNER_SUCCEED;
 }
@@ -1934,9 +1958,13 @@ int PlannerAgv::_getTarget(double nextPos[], double nextVel[], double nextAcc[])
 	nextVel[TARGET_X] = tmpVel[0]; nextVel[TARGET_Y] = tmpVel[1];nextVel[TARGET_A] = tmpVel[ROT_INDEX];
 	nextAcc[TARGET_X] = tmpAcc[0]; nextAcc[TARGET_Y] = tmpAcc[1];nextAcc[TARGET_A] = tmpAcc[ROT_INDEX];
 	
+	nextVel[TARGET_W] = headingAngularVelIn2D(nextVel,nextAcc);
+	nextAcc[TARGET_W] = 0.0;// ignored ...
+	
 	switch(_tracType)
 	{
 	case PURE_TURNING:
+		nextVel[TARGET_W] = _turningPlanner.vel(_plannerStartTime);
 		nextPos[TARGET_W] = radDistance(0,_turningPlanner.pos(_plannerStartTime));
 		break;
 
@@ -1950,13 +1978,43 @@ int PlannerAgv::_getTarget(double nextPos[], double nextVel[], double nextAcc[])
 		break;
 	}
 
-	nextVel[TARGET_W] = headingAngularVelIn2D(nextVel,nextAcc);
-	nextAcc[TARGET_W] = 0.0;// ignored ...
-	
 	// save last target turn of flange
 	_lastTracTargetTurnOfFlange = nextPos[TARGET_W];
 
 	return _plannerState;
+}
+
+
+int PlannerAgv::_getTargetTurnOfFlange(double&targetTurn, TRAC* tPtr, TRAC* rPtr)
+{
+	double nextPos[6] = {0};
+	double nextVel[6] = {0};
+
+	tPtr->pos(TIME_SCALE_MS/1000.0,nextPos);
+	tPtr->vel(TIME_SCALE_MS/1000.0,nextVel);
+
+	rPtr->pos(TIME_SCALE_MS/1000.0,nextPos+TRANS_D);
+	rPtr->vel(TIME_SCALE_MS/1000.0,nextVel+TRANS_D);
+
+	double direc[3] = {0};
+	double tracVelInTool[3] = {0};
+	_lastTracRefToolInv.getPos(direc);
+
+	cross3(tracVelInTool,nextVel+TRANS_D ,direc);
+
+	double matrix[3][3] = {{0}};
+	rpy2matrix(matrix,nextPos+TRANS_D);
+
+	double tracVelInWord[3] = {0};
+	M3p3(tracVelInWord,matrix,tracVelInTool);
+
+	nextVel[0] += tracVelInWord[0];
+	nextVel[1] += tracVelInWord[1];
+	nextVel[2] += tracVelInWord[2];
+
+	targetTurn = headingDirectionIn2D(nextVel,_lastTracTargetTurnOfFlange);
+
+	return PLANNER_SUCCEED;
 }
 
 
@@ -2048,7 +2106,7 @@ int PlannerAgv::setCartesianLimits(double tvl,double tal,double tjl,double rvl,d
 }
 
 
-int PlannerAgv::moveB(double targetPos[][3], int pNum, double refVel, double zArea, int zType,bool rel,double refTime)
+int PlannerAgv::moveB(double targetPos[][3], int pNum, double refVel, double zArea, int zType,bool rel,double refTime,double turnTime)
 {
 	switch(_plannerState)
 	{
@@ -2075,8 +2133,8 @@ PLAN_NEXT_MOTION://-------------------------------------------------
 		double targetP[POINTS_MAX_NUM][TRANS_D] = {{0}};
 		if (nullptr == _blendPlanner.getPrevTrac())
 		{
-			targetP[0][0] = _lastTracTargetTcpPos[0];
-			targetP[0][1] = _lastTracTargetTcpPos[1];
+			targetP[0][TARGET_X] = _lastTracTargetTcpPos[TARGET_X];
+			targetP[0][TARGET_Y] = _lastTracTargetTcpPos[TARGET_Y];
 		}
 		else
 		{
@@ -2173,6 +2231,7 @@ PLAN_NEXT_MOTION://-------------------------------------------------
 
 
 //TURN_DIRECTION:-------------------------------------------------
+	_refTurnTimeOfNextMotionOfFlange = turnTime;
 	_getTargetTurnOfFlange(_targetTurnOfNextMotionOfFlange,&_postBsplinePlanner,&_postMultiRotPlanner);
 
 	switch(_plannerState)
@@ -2224,7 +2283,7 @@ SWITCH_PLANNERS://-------------------------------------------------
 }
 
 
-int PlannerAgv::moveR(double targetPos[], double refDir, double refVel, double refAcc, double refJerk, int rCycle, bool rel, double refTime)
+int PlannerAgv::moveR(double targetPos[], double refDir, double refVel, double refAcc, double refJerk, int rCycle, bool rel, double refTime,double turnTime)
 {
 	switch(_plannerState)
 	{
@@ -2243,44 +2302,59 @@ int PlannerAgv::moveR(double targetPos[], double refDir, double refVel, double r
 
 
 PLAN_NEXT_MOTION://-------------------------------------------------
-	double sR[ROTATE_D] = {0};
-	double axis[ROTATE_D] = {0};
-	axis[ROT_INDEX-TRANS_D] = 1.0;
-	sR[ROT_INDEX-TRANS_D] = _lastTracTargetTcpPos[ROT_INDEX];
-
-	double dR = (rel?targetPos[TARGET_A]:radDistance(sR[ROT_INDEX-TRANS_D], targetPos[TARGET_A]));
-	dR += 2.0*PI*(rCycle+((dR*rCycle>=0)?(-sign(rCycle)):0));
-
-	_postRotPlanner.initiate();
-	_postRotPlanner.setLimit(refVel*_rotVelLimit,refAcc*_rotAccLimit,refJerk*_rotJerkLimit);
-	_postRotPlanner.planTrajectory(0,sR,axis,dR);
-	if (!_postRotPlanner.isValid())
+	if (!_isPostPlannerPlanned)
 	{
-		return ERR_PLAN_FAILED;
-	}
+		// plan translation
+		double sP[TRANS_D] = {0};
+		sP[TARGET_X] = _lastTracTargetTcpPos[TARGET_X];
+		sP[TARGET_Y] = _lastTracTargetTcpPos[TARGET_Y];
 
-	// plan translation
-	double sP[TRANS_D] = {0}, tP[TRANS_D] = {0};
-	memcpy(sP,_lastTracTargetTcpPos,sizeof(sP));
-	memcpy(tP,_lastTracTargetTcpPos,sizeof(sP));
+		double tP[TRANS_D] = {0};
+		tP[TARGET_X] = _lastTracTargetTcpPos[TARGET_X];
+		tP[TARGET_Y] = _lastTracTargetTcpPos[TARGET_Y];
 
-	_postLinePlanner.initiate();
-	_postLinePlanner.setLimit(refVel*_tracVelLimit,refAcc*_tracAccLimit,refJerk*_tracJerkLimit);
-	_postLinePlanner.planTrajectory(0,sP,tP);
-	if (!_postLinePlanner.isValid())
-	{
-		return ERR_PLAN_FAILED;
-	}
+		_postLinePlanner.initiate();
+		_postLinePlanner.setLimit(refVel*_tracVelLimit,refAcc*_tracAccLimit,refJerk*_tracJerkLimit);
+		_postLinePlanner.planTrajectory(0,sP,tP);
+		if (!_postLinePlanner.isValid())
+		{
+			return ERR_PLAN_FAILED;
+		}
 
-	// synchronize
-	if (_postRotPlanner.getDuration() > _postLinePlanner.getDuration())
-	{
-		_postLinePlanner.scaleToDuration(_postRotPlanner.getDuration());
+		// plan rotation
+		double sR[ROTATE_D] = {0};
+		double axis[ROTATE_D] = {0};
+		axis[ROT_INDEX-TRANS_D] = 1.0;
+		sR[ROT_INDEX-TRANS_D] = _lastTracTargetTcpPos[ROT_INDEX];
+
+		double dR = (rel?targetPos[TARGET_A]:radDistance(sR[ROT_INDEX-TRANS_D], targetPos[TARGET_A]));
+		dR += 2.0*PI*(rCycle+((dR*rCycle>=0)?(-sign(rCycle)):0));
+
+		_postRotPlanner.initiate();
+		_postRotPlanner.setLimit(refVel*_rotVelLimit,refAcc*_rotAccLimit,refJerk*_rotJerkLimit);
+		_postRotPlanner.planTrajectory(0,sR,axis,dR);
+		if (!_postRotPlanner.isValid())
+		{
+			return ERR_PLAN_FAILED;
+		}
+
+		// synchronize
+		if (_postRotPlanner.getDuration() > _postLinePlanner.getDuration())
+		{
+			_postLinePlanner.scaleToDuration(_postRotPlanner.getDuration());
+		}
+		
+		_isPostPlannerPlanned = true;
 	}
 
 
 //TURN_DIRECTION:-------------------------------------------------
+	double tmp = 0;
+	tmp = _lastTracTargetTurnOfFlange;
+	_lastTracTargetTurnOfFlange = refDir;
+	_refTurnTimeOfNextMotionOfFlange = turnTime;
 	_getTargetTurnOfFlange(_targetTurnOfNextMotionOfFlange,&_postLinePlanner,&_postRotPlanner);
+	_lastTracTargetTurnOfFlange = tmp;
 
 	switch(_plannerState)
 	{
@@ -2308,13 +2382,14 @@ SWITCH_PLANNERS://-------------------------------------------------
 	_tracType = PURE_ROTATING;
 	_rotPtr = &_prevRotPlanner;
 	_tracPtr = &_prevLinePlanner;
+	_isPostPlannerPlanned = false;
 	_plannerState = PLANNER_MOVING;
 	DUMP_INFORM("Moving rotate ... \n");
 	return PLANNER_SUCCEED;
 }
 
 
-int PlannerAgv::moveL(double targetPos[], double refVel, double refAcc, double refJerk, double zArea, int zType, int rCycle, bool rel,double refTime)
+int PlannerAgv::moveL(double targetPos[], double refVel, double refAcc, double refJerk, double zArea, int zType, int rCycle, bool rel,double refTime,double turnTime)
 {
 	switch(_plannerState)
 	{
@@ -2337,23 +2412,23 @@ PLAN_NEXT_MOTION://-------------------------------------------------
 	if (!_isPostPlannerPlanned)
 	{
 		// plan translation
-		double sP[TRANS_D] = {0}, tP[TRANS_D] = {0};
-		if (nullptr == _blendPlanner.getPrevTrac())
-		{
-			sP[0] = _lastTracTargetTcpPos[0];
-			sP[1] = _lastTracTargetTcpPos[1];
-		}
-		else
+		double sP[TRANS_D] = {0};
+		sP[TARGET_X] = _lastTracTargetTcpPos[TARGET_X];
+		sP[TARGET_Y] = _lastTracTargetTcpPos[TARGET_Y];
+
+		if (nullptr != _blendPlanner.getPrevTrac())
 		{
 			_blendPlanner.getPrevTrac()->getTarget(sP);
 		}
 
-		memcpy(tP,targetPos,sizeof(double)*2);
+		double tP[TRANS_D] = {0};
+		tP[TARGET_X] = targetPos[TARGET_X];
+		tP[TARGET_Y] = targetPos[TARGET_Y];
 
 		if (rel)
 		{
-			tP[0] += sP[0];
-			tP[1] += sP[1];
+			tP[TARGET_X] += sP[TARGET_X];
+			tP[TARGET_Y] += sP[TARGET_Y];
 		}
 
 		_postLinePlanner.initiate();
@@ -2369,21 +2444,18 @@ PLAN_NEXT_MOTION://-------------------------------------------------
 		_rotTimeOffset = _blendPlanner.getPostTime();
 
 		// plan rotate
-		double sR[ROTATE_D] = {0}, dR = 0;
-		if (_rotPtr != nullptr)
+		double sR[ROTATE_D] = {0};
+		double axis[ROTATE_D] = {0};
+		axis[ROT_INDEX-TRANS_D] = 1.0;
+		sR[ROT_INDEX-TRANS_D] = _lastTracTargetTcpPos[ROT_INDEX];
+
+		if (nullptr != _rotPtr)
 		{
 			_rotPtr->getTarget(sR);
 		}
-		else
-		{
-			sR[ROT_INDEX-TRANS_D] = _lastTracTargetTcpPos[ROT_INDEX];
-		}
 
-		dR = (rel?targetPos[TARGET_A]:radDistance(sR[ROT_INDEX-TRANS_D], targetPos[TARGET_A]));
+		double dR = (rel?targetPos[TARGET_A]:radDistance(sR[ROT_INDEX-TRANS_D], targetPos[TARGET_A]));
 		dR += 2.0*PI*(rCycle+((dR*rCycle>=0)?(-sign(rCycle)):0));
-
-		double axis[ROTATE_D] = {0};
-		axis[ROT_INDEX-TRANS_D] = 1.0;
 
 		_postRotPlanner.initiate();
 		_postRotPlanner.setLimit(refVel*_rotVelLimit,refAcc*_rotAccLimit,refJerk*_rotJerkLimit);
@@ -2407,6 +2479,7 @@ PLAN_NEXT_MOTION://-------------------------------------------------
 
 
 //TURN_DIRECTION:-------------------------------------------------
+	_refTurnTimeOfNextMotionOfFlange = turnTime;
 	_getTargetTurnOfFlange(_targetTurnOfNextMotionOfFlange,&_postLinePlanner,&_postRotPlanner);
 
 	switch(_plannerState)
@@ -2448,17 +2521,17 @@ SWITCH_PLANNERS://-------------------------------------------------
 
 //UPDATE_STATE:-------------------------------------------------
 	_tracType = NORMAL_TRAC;
-	_isPostPlannerPlanned = false;
 	_rotPtr = &_prevRotPlanner;
 	_tracPtr = &_prevLinePlanner;
 	_plannerState = PLANNER_MOVING;
+	_isPostPlannerPlanned = false;
 	DUMP_INFORM("Moving Line ... \n");
 
 	return PLANNER_SUCCEED;
 }
 
 
-int PlannerAgv::moveC(double targetPos[], double middlePos[], double refVel, double refAcc, double refJerk, double zArea, int zType, int cCycle,int rCycle,bool rel, double refTime)
+int PlannerAgv::moveC(double targetPos[], double middlePos[], double refVel, double refAcc, double refJerk, double zArea, int zType, int cCycle,int rCycle,bool rel, double refTime,double turnTime)
 {
 	switch(_plannerState)
 	{
@@ -2481,31 +2554,35 @@ PLAN_NEXT_MOTION://-------------------------------------------------
 	if (!_isPostPlannerPlanned)
 	{
 		// plan translation
-		double sP[TRANS_D] = {0}, mP[TRANS_D] = {0}, tP[TRANS_D] ={0};
-		if (nullptr == _blendPlanner.getPrevTrac())
-		{
-			sP[0] = _lastTracTargetTcpPos[0];
-			sP[1] = _lastTracTargetTcpPos[1];
-		}
-		else
+		double sP[TRANS_D] = {0};
+		sP[TARGET_X] = _lastTracTargetTcpPos[TARGET_X];
+		sP[TARGET_Y] = _lastTracTargetTcpPos[TARGET_Y];
+
+		if (nullptr != _blendPlanner.getPrevTrac())
 		{
 			_blendPlanner.getPrevTrac()->getTarget(sP);
 		}
-		memcpy(mP,middlePos,sizeof(double)*2);
-		memcpy(tP,targetPos,sizeof(double)*2);
+
+		double mP[TRANS_D] = {0};
+		mP[TARGET_X] = middlePos[TARGET_X];
+		mP[TARGET_Y] = middlePos[TARGET_Y];
+
+		double tP[TRANS_D] ={0};
+		tP[TARGET_X] = targetPos[TARGET_X];
+		tP[TARGET_Y] = targetPos[TARGET_Y];
 
 		if (rel)
 		{
-			for (int i=0; i<2; i++)
-			{
-				mP[i] += sP[i];
-				tP[i] += sP[i];
-			}
+			mP[TARGET_X] += sP[TARGET_X];
+			mP[TARGET_Y] += sP[TARGET_Y];
+
+			tP[TARGET_X] += sP[TARGET_X];
+			tP[TARGET_Y] += sP[TARGET_Y];
 		}
 
 		_postCirclePlanner.initiate();
 		_postCirclePlanner.setLimit(refVel*_tracVelLimit,refAcc*_tracAccLimit,refJerk*_tracJerkLimit);
-		_postCirclePlanner.planTrajectory(0,sP,mP,tP,0);
+		_postCirclePlanner.planTrajectory(0,sP,mP,tP,cCycle);
 		if (!_postCirclePlanner.isValid())
 		{
 			return ERR_PLAN_FAILED;
@@ -2516,21 +2593,18 @@ PLAN_NEXT_MOTION://-------------------------------------------------
 		double timeOffset = _blendPlanner.getPostTime();
 
 		// plan rotate
-		double sR[ROTATE_D] = {0}, dR = 0;
-		if (_rotPtr != nullptr)
+		double sR[ROTATE_D] = {0};
+		double axis[ROTATE_D] = {0};
+		axis[ROT_INDEX-TRANS_D] = 1.0;
+		sR[ROT_INDEX-TRANS_D] = _lastTracTargetTcpPos[ROT_INDEX];
+
+		if (nullptr != _rotPtr)
 		{
 			_rotPtr->getTarget(sR);
 		}
-		else
-		{
-			sR[ROT_INDEX-TRANS_D] = _lastTracTargetTcpPos[ROT_INDEX];
-		}
 
-		dR = (rel?targetPos[TARGET_A]:radDistance(sR[ROT_INDEX-TRANS_D], targetPos[TARGET_A]));
+		double dR = (rel?targetPos[TARGET_A]:radDistance(sR[ROT_INDEX-TRANS_D], targetPos[TARGET_A]));
 		dR += 2.0*PI*(rCycle+((dR*rCycle>=0)?(-sign(rCycle)):0));
-
-		double axis[ROTATE_D] = {0};
-		axis[ROT_INDEX-TRANS_D] = 1.0;
 
 		_postRotPlanner.initiate();
 		_postRotPlanner.setLimit(refVel*_rotVelLimit,refAcc*_rotAccLimit,refJerk*_rotJerkLimit);
@@ -2552,7 +2626,9 @@ PLAN_NEXT_MOTION://-------------------------------------------------
 		_isPostPlannerPlanned = true;
 	}
 
+
 //TURN_DIRECTION:-------------------------------------------------
+	_refTurnTimeOfNextMotionOfFlange = turnTime;
 	_getTargetTurnOfFlange(_targetTurnOfNextMotionOfFlange,&_postCirclePlanner,&_postRotPlanner);
 
 	switch(_plannerState)
@@ -2594,17 +2670,17 @@ SWITCH_PLANNERS://-------------------------------------------------
 
 //UPDATE_STATE:-------------------------------------------------
 	_tracType = NORMAL_TRAC;
-	_isPostPlannerPlanned = false;
 	_rotPtr = &_prevRotPlanner;
 	_tracPtr = &_prevCirclePlanner;
 	_plannerState = PLANNER_MOVING;
+	_isPostPlannerPlanned = false;
 	DUMP_INFORM("Moving Circle ... \n");
 
 	return PLANNER_SUCCEED;
 }
 
 
-int PlannerAgv::moveC(double centerPoint[],double centerAngle, double targetA, double refVel, double refAcc,double refJerk, double zArea, int zType, int rCycle,bool rel, double refTime)
+int PlannerAgv::moveC(double centerPoint[],double centerAngle, double targetA, double refVel, double refAcc,double refJerk, double zArea, int zType, int rCycle,bool rel, double refTime,double turnTime)
 {
 	switch(_plannerState)
 	{
@@ -2627,28 +2703,29 @@ PLAN_NEXT_MOTION://-------------------------------------------------
 	if (!_isPostPlannerPlanned)
 	{
 		// plan translation
-		double sP[TRANS_D] = {0}, cP[TRANS_D] = {0}, nV[TRANS_D] = {0},cA = 0;
-		if (nullptr == _blendPlanner.getPrevTrac())
-		{
-			sP[0] = _lastTracTargetTcpPos[0];
-			sP[1] = _lastTracTargetTcpPos[1];
-		}
-		else
+		double sP[TRANS_D] = {0};
+		sP[TARGET_X] = _lastTracTargetTcpPos[TARGET_X];
+		sP[TARGET_Y] = _lastTracTargetTcpPos[TARGET_Y];
+
+		if (nullptr != _blendPlanner.getPrevTrac())
 		{
 			_blendPlanner.getPrevTrac()->getTarget(sP);
 		}
 
-		memcpy(cP,centerPoint,sizeof(cP));
-		nV[ROT_INDEX-TRANS_D] = 1.0;
-		cA = centerAngle;
-		sP[2] = 0;
-		cP[2] = 0;
+		double cP[TRANS_D] = {0};
+		cP[TARGET_X] = centerPoint[TARGET_X];
+		cP[TARGET_Y] = centerPoint[TARGET_Y];
 
 		if (rel)
 		{
-			cP[0] += sP[0];
-			cP[1] += sP[1];
+			cP[TARGET_X] += sP[TARGET_X];
+			cP[TARGET_Y] += sP[TARGET_Y];
 		}
+
+		double nV[TRANS_D] = {0}; 
+		nV[ROT_INDEX-TRANS_D] = 1.0;
+		
+		double cA = centerAngle;
 
 		_postCirclePlanner.initiate();
 		_postCirclePlanner.setLimit(refVel*_tracVelLimit,refAcc*_tracAccLimit,refJerk*_tracJerkLimit);
@@ -2663,21 +2740,18 @@ PLAN_NEXT_MOTION://-------------------------------------------------
 		double timeOffset = _blendPlanner.getPostTime();
 
 		// plan rotate
-		double sR[ROTATE_D] = {0}, dR;
-		if (_rotPtr != nullptr)
+		double sR[ROTATE_D] = {0};
+		double axis[ROTATE_D] = {0};
+		axis[ROT_INDEX-TRANS_D] = 1.0;
+		sR[ROT_INDEX-TRANS_D] = _lastTracTargetTcpPos[ROT_INDEX];
+
+		if (nullptr != _rotPtr)
 		{
 			_rotPtr->getTarget(sR);
 		}
-		else
-		{
-			memcpy(sR,_lastTracTargetTcpPos+TRANS_D,sizeof(sR));
-		}
 
-		dR = (rel?targetA:radDistance(sR[ROT_INDEX-TRANS_D], targetA));
+		double dR = (rel?targetA:radDistance(sR[ROT_INDEX-TRANS_D], targetA));
 		dR += 2.0*PI*(rCycle+((dR*rCycle>=0)?(-sign(rCycle)):0));
-
-		double axis[ROTATE_D] = {0};
-		axis[ROT_INDEX-TRANS_D] = 1.0;
 
 		_postRotPlanner.initiate();
 		_postRotPlanner.setLimit(refVel*_rotVelLimit,refAcc*_rotAccLimit,refJerk*_rotJerkLimit);
@@ -2701,6 +2775,7 @@ PLAN_NEXT_MOTION://-------------------------------------------------
 
 
 //TURN_DIRECTION:-------------------------------------------------
+	_refTurnTimeOfNextMotionOfFlange = turnTime;
 	_getTargetTurnOfFlange(_targetTurnOfNextMotionOfFlange,&_postCirclePlanner,&_postRotPlanner);
 
 	switch(_plannerState)
@@ -2742,10 +2817,10 @@ SWITCH_PLANNERS://-------------------------------------------------
 
 //UPDATE_STATE:-------------------------------------------------
 	_tracType = NORMAL_TRAC;
-	_isPostPlannerPlanned = false;
 	_rotPtr = &_prevRotPlanner;
 	_tracPtr = &_prevCirclePlanner;
 	_plannerState = PLANNER_MOVING;
+	_isPostPlannerPlanned = false;
 	DUMP_INFORM("Moving Circle ... \n");
 
 	return PLANNER_SUCCEED;
