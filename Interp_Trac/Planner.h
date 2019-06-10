@@ -315,8 +315,8 @@ protected:
 	*******************************************************************************/
 	int			_blenderState;
 
+	bool		_isPostPlanned;
 	bool		_isNowInJointSpace;
-	bool		_isPostPlannerPlanned;
 
 	double		_rotVelLimit;
 	double		_rotAccLimit;
@@ -426,7 +426,7 @@ private:
 	int			_plannerState;
 	int			_blenderState;
 
-	bool		_isPostPlannerPlanned;
+	bool		_isPostPlanned;
 
 	double		_rotVelLimit;
 	double		_rotAccLimit;

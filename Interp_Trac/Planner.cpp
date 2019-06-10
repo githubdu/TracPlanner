@@ -130,7 +130,7 @@ int Planner6D::initiate()
 	_plannerSwitchTime = 0;
 
 	_isNowInJointSpace = false;
-	_isPostPlannerPlanned = false;
+	_isPostPlanned = false;
 
 	_plannerState = PLANNER_DONE;
 	_blenderState = PLANNER_NOZONE;
@@ -718,7 +718,7 @@ int Planner6D::moveB(double targetPos[][6], int pointsNum, double refVel, double
 
 
 PLAN_NEXT_MOTION://------------------------------------------------
-	if (!_isPostPlannerPlanned)
+	if (!_isPostPlanned)
 	{
 		// plan translation
 		double targetP[POINTS_MAX_NUM][TRANS_D] = {{0}};
@@ -812,7 +812,7 @@ PLAN_NEXT_MOTION://------------------------------------------------
 				return ERR_PLAN_FAILED;
 			}
 		}
-		_isPostPlannerPlanned = true;
+		_isPostPlanned = true;
 	}
 
 	switch(_plannerState)
@@ -855,7 +855,7 @@ SWITCH_PLANNERS://-------------------------------------------------
 
 //UPDATE_STATE:----------------------------------------------------
 	_isNowInJointSpace = false;
-	_isPostPlannerPlanned = false;
+	_isPostPlanned = false;
 	_plannerState = PLANNER_MOVING;
 	_rotPtr = &_prevMultiRotPlanner;
 	_tracPtr = &_prevBsplinePlanner;
@@ -884,7 +884,7 @@ int Planner6D::moveL(double targetPos[], double refVel, double refAcc, double re
 
 
 PLAN_NEXT_MOTION://------------------------------------------------
-	if (!_isPostPlannerPlanned)
+	if (!_isPostPlanned)
 	{
 		// plan translation
 		double sP[TRANS_D] = {0}, tP[TRANS_D] = {0};
@@ -956,7 +956,7 @@ PLAN_NEXT_MOTION://------------------------------------------------
 		{
 			_postRotPlanner.scaleToDuration(_postLinePlanner.getDuration() - _rotTimeOffset);
 		}
-		_isPostPlannerPlanned = true;
+		_isPostPlanned = true;
 	}
 
 	if(PLANNER_ZONE_IN == _plannerState)
@@ -994,7 +994,7 @@ SWITCH_PLANNERS://-------------------------------------------------
 	_isNowInJointSpace = false;
 	_rotPtr = &_prevRotPlanner;
 	_tracPtr = &_prevLinePlanner;
-	_isPostPlannerPlanned = false;
+	_isPostPlanned = false;
 	_plannerState = PLANNER_MOVING;
 	DUMP_INFORM("Moving Line ... \n");
 	return PLANNER_SUCCEED;
@@ -1021,7 +1021,7 @@ int Planner6D::moveC(double targetPos[], double middlePos[], double refVel, doub
 
 
 PLAN_NEXT_MOTION://-------------------------------------------------
-	if (!_isPostPlannerPlanned)
+	if (!_isPostPlanned)
 	{
 		// plan translation
 		double sP[TRANS_D] = {0}, mP[TRANS_D] = {0}, tP[TRANS_D] ={0};
@@ -1095,7 +1095,7 @@ PLAN_NEXT_MOTION://-------------------------------------------------
 		{
 			_postRotPlanner.scaleToDuration(_postCirclePlanner.getTargetTime()-_rotTimeOffset);
 		}
-		_isPostPlannerPlanned = true;
+		_isPostPlanned = true;
 	}
 
 	if(PLANNER_ZONE_IN == _plannerState)
@@ -1132,7 +1132,7 @@ SWITCH_PLANNERS://-------------------------------------------------
 //UPDATE_STATE:-------------------------------------------------
 	_isNowInJointSpace = false;
 	_rotPtr = &_prevRotPlanner;
-	_isPostPlannerPlanned = false;
+	_isPostPlanned = false;
 	_tracPtr = &_prevCirclePlanner;
 	_plannerState = PLANNER_MOVING;
 	DUMP_INFORM("Moving Circle ... \n");
@@ -1161,7 +1161,7 @@ int Planner6D::moveC(double centerPoint[],double centerAngle, double normVec[], 
 
 
 PLAN_NEXT_MOTION://-------------------------------------------------
-	if (!_isPostPlannerPlanned)
+	if (!_isPostPlanned)
 	{
 		// plan translation
 		double sP[TRANS_D] = {0}, cP[TRANS_D] = {0}, nV[TRANS_D] = {0},cA = 0;
@@ -1187,7 +1187,7 @@ PLAN_NEXT_MOTION://-------------------------------------------------
 
 		// update blender zone if necessary
 		_blendPlanner.setPostTrac(&_postCirclePlanner);
-		double timeOffset = _blendPlanner.getPostTime();
+		_rotTimeOffset = _blendPlanner.getPostTime();
 
 		// plan rotate
 		double sR[ROTATE_D] = {0}, tR[ROTATE_D] = {0};
@@ -1203,7 +1203,7 @@ PLAN_NEXT_MOTION://-------------------------------------------------
 
 		_postRotPlanner.initiate();
 		_postRotPlanner.setLimit(refVel*_rotVelLimit,refAcc*_rotAccLimit,refJerk*_rotJerkLimit);
-		_postRotPlanner.planTrajectory(timeOffset,sR,tR);
+		_postRotPlanner.planTrajectory(_rotTimeOffset,sR,tR);
 		if (!_postRotPlanner.isValid())
 		{
 			return ERR_PLAN_FAILED;
@@ -1212,13 +1212,13 @@ PLAN_NEXT_MOTION://-------------------------------------------------
 		// synchronize
 		if (_postRotPlanner.getTargetTime() > _postCirclePlanner.getTargetTime())
 		{
-			_postCirclePlanner.scaleToDuration(_postRotPlanner.getDuration()+timeOffset);
+			_postCirclePlanner.scaleToDuration(_postRotPlanner.getDuration()+_rotTimeOffset);
 		}
 		if (_postCirclePlanner.getTargetTime() > _postRotPlanner.getTargetTime())
 		{
-			_postRotPlanner.scaleToDuration(_postCirclePlanner.getTargetTime()-timeOffset);
+			_postRotPlanner.scaleToDuration(_postCirclePlanner.getTargetTime()-_rotTimeOffset);
 		}
-		_isPostPlannerPlanned = true;
+		_isPostPlanned = true;
 	}
 
 	if(PLANNER_ZONE_IN == _plannerState)
@@ -1255,7 +1255,7 @@ SWITCH_PLANNERS://-------------------------------------------------
 //UPDATE_STATE:-------------------------------------------------
 	_isNowInJointSpace = false;
 	_rotPtr = &_prevRotPlanner;
-	_isPostPlannerPlanned = false;
+	_isPostPlanned = false;
 	_tracPtr = &_prevCirclePlanner;
 	_plannerState = PLANNER_MOVING;
 	DUMP_INFORM("Moving Circle ... \n");
@@ -1474,7 +1474,7 @@ int PlannerAgv::initiate()
 	_plannerState = PLANNER_DONE;
 	_blenderState = PLANNER_NOZONE;
 
-	_isPostPlannerPlanned = false;
+	_isPostPlanned = false;
 
 	_lastTracTargetTurnOfFlange = 0;
 	_targetTurnOfNextMotionOfFlange = 0;
@@ -2127,7 +2127,7 @@ int PlannerAgv::moveB(double targetPos[][3], int pNum, double refVel, double zAr
 
 PLAN_NEXT_MOTION://-------------------------------------------------
 	// plan trajectory
-	if (!_isPostPlannerPlanned)
+	if (!_isPostPlanned)
 	{
 		// plan translation
 		double targetP[POINTS_MAX_NUM][TRANS_D] = {{0}};
@@ -2226,7 +2226,7 @@ PLAN_NEXT_MOTION://-------------------------------------------------
 				return ERR_PLAN_FAILED;
 			}
 		}
-		_isPostPlannerPlanned = true;
+		_isPostPlanned = true;
 	}
 
 
@@ -2274,7 +2274,7 @@ SWITCH_PLANNERS://-------------------------------------------------
 
 //UPDATE_STATE:-------------------------------------------------
 	_tracType = NORMAL_TRAC;
-	_isPostPlannerPlanned = false;
+	_isPostPlanned = false;
 	_plannerState = PLANNER_MOVING;
 	_rotPtr = &_prevMultiRotPlanner;
 	_tracPtr = &_prevBsplinePlanner;
@@ -2302,7 +2302,7 @@ int PlannerAgv::moveR(double targetPos[], double refDir, double refVel, double r
 
 
 PLAN_NEXT_MOTION://-------------------------------------------------
-	if (!_isPostPlannerPlanned)
+	if (!_isPostPlanned)
 	{
 		// plan translation
 		double sP[TRANS_D] = {0};
@@ -2344,7 +2344,7 @@ PLAN_NEXT_MOTION://-------------------------------------------------
 			_postLinePlanner.scaleToDuration(_postRotPlanner.getDuration());
 		}
 		
-		_isPostPlannerPlanned = true;
+		_isPostPlanned = true;
 	}
 
 
@@ -2382,7 +2382,7 @@ SWITCH_PLANNERS://-------------------------------------------------
 	_tracType = PURE_ROTATING;
 	_rotPtr = &_prevRotPlanner;
 	_tracPtr = &_prevLinePlanner;
-	_isPostPlannerPlanned = false;
+	_isPostPlanned = false;
 	_plannerState = PLANNER_MOVING;
 	DUMP_INFORM("Moving rotate ... \n");
 	return PLANNER_SUCCEED;
@@ -2409,7 +2409,7 @@ int PlannerAgv::moveL(double targetPos[], double refVel, double refAcc, double r
 
 
 PLAN_NEXT_MOTION://-------------------------------------------------
-	if (!_isPostPlannerPlanned)
+	if (!_isPostPlanned)
 	{
 		// plan translation
 		double sP[TRANS_D] = {0};
@@ -2474,7 +2474,7 @@ PLAN_NEXT_MOTION://-------------------------------------------------
 		{
 			_postRotPlanner.scaleToDuration(_postLinePlanner.getDuration() - _rotTimeOffset);
 		}
-		_isPostPlannerPlanned = true;
+		_isPostPlanned = true;
 	}
 
 
@@ -2524,7 +2524,7 @@ SWITCH_PLANNERS://-------------------------------------------------
 	_rotPtr = &_prevRotPlanner;
 	_tracPtr = &_prevLinePlanner;
 	_plannerState = PLANNER_MOVING;
-	_isPostPlannerPlanned = false;
+	_isPostPlanned = false;
 	DUMP_INFORM("Moving Line ... \n");
 
 	return PLANNER_SUCCEED;
@@ -2551,7 +2551,7 @@ int PlannerAgv::moveC(double targetPos[], double middlePos[], double refVel, dou
 
 
 PLAN_NEXT_MOTION://-------------------------------------------------
-	if (!_isPostPlannerPlanned)
+	if (!_isPostPlanned)
 	{
 		// plan translation
 		double sP[TRANS_D] = {0};
@@ -2590,7 +2590,7 @@ PLAN_NEXT_MOTION://-------------------------------------------------
 
 		// update blender if necessary
 		_blendPlanner.setPostTrac(&_postCirclePlanner);
-		double timeOffset = _blendPlanner.getPostTime();
+		_rotTimeOffset = _blendPlanner.getPostTime();
 
 		// plan rotate
 		double sR[ROTATE_D] = {0};
@@ -2608,7 +2608,7 @@ PLAN_NEXT_MOTION://-------------------------------------------------
 
 		_postRotPlanner.initiate();
 		_postRotPlanner.setLimit(refVel*_rotVelLimit,refAcc*_rotAccLimit,refJerk*_rotJerkLimit);
-		_postRotPlanner.planTrajectory(timeOffset,sR,axis,dR);
+		_postRotPlanner.planTrajectory(_rotTimeOffset,sR,axis,dR);
 		if (!_postRotPlanner.isValid())
 		{
 			return ERR_PLAN_FAILED;
@@ -2617,13 +2617,13 @@ PLAN_NEXT_MOTION://-------------------------------------------------
 		// synchronize
 		if (_postRotPlanner.getTargetTime() > _postCirclePlanner.getTargetTime())
 		{
-			_postCirclePlanner.scaleToDuration(_postRotPlanner.getDuration()+timeOffset);
+			_postCirclePlanner.scaleToDuration(_postRotPlanner.getDuration()+_rotTimeOffset);
 		}
 		if (_postCirclePlanner.getTargetTime() > _postRotPlanner.getTargetTime())
 		{
-			_postRotPlanner.scaleToDuration(_postCirclePlanner.getTargetTime()-timeOffset);
+			_postRotPlanner.scaleToDuration(_postCirclePlanner.getTargetTime()-_rotTimeOffset);
 		}
-		_isPostPlannerPlanned = true;
+		_isPostPlanned = true;
 	}
 
 
@@ -2673,7 +2673,7 @@ SWITCH_PLANNERS://-------------------------------------------------
 	_rotPtr = &_prevRotPlanner;
 	_tracPtr = &_prevCirclePlanner;
 	_plannerState = PLANNER_MOVING;
-	_isPostPlannerPlanned = false;
+	_isPostPlanned = false;
 	DUMP_INFORM("Moving Circle ... \n");
 
 	return PLANNER_SUCCEED;
@@ -2700,7 +2700,7 @@ int PlannerAgv::moveC(double centerPoint[],double centerAngle, double targetA, d
 
 
 PLAN_NEXT_MOTION://-------------------------------------------------
-	if (!_isPostPlannerPlanned)
+	if (!_isPostPlanned)
 	{
 		// plan translation
 		double sP[TRANS_D] = {0};
@@ -2737,7 +2737,7 @@ PLAN_NEXT_MOTION://-------------------------------------------------
 
 		// update blender zone if necessary
 		_blendPlanner.setPostTrac(&_postCirclePlanner);
-		double timeOffset = _blendPlanner.getPostTime();
+		_rotTimeOffset = _blendPlanner.getPostTime();
 
 		// plan rotate
 		double sR[ROTATE_D] = {0};
@@ -2755,7 +2755,7 @@ PLAN_NEXT_MOTION://-------------------------------------------------
 
 		_postRotPlanner.initiate();
 		_postRotPlanner.setLimit(refVel*_rotVelLimit,refAcc*_rotAccLimit,refJerk*_rotJerkLimit);
-		_postRotPlanner.planTrajectory(timeOffset,sR,axis,dR);
+		_postRotPlanner.planTrajectory(_rotTimeOffset,sR,axis,dR);
 		if (!_postRotPlanner.isValid())
 		{
 			return ERR_PLAN_FAILED;
@@ -2764,13 +2764,13 @@ PLAN_NEXT_MOTION://-------------------------------------------------
 		// synchronize
 		if (_postRotPlanner.getTargetTime() > _postCirclePlanner.getTargetTime())
 		{
-			_postCirclePlanner.scaleToDuration(_postRotPlanner.getDuration()+timeOffset);
+			_postCirclePlanner.scaleToDuration(_postRotPlanner.getDuration()+_rotTimeOffset);
 		}
 		if (_postCirclePlanner.getTargetTime() > _postRotPlanner.getTargetTime())
 		{
-			_postRotPlanner.scaleToDuration(_postCirclePlanner.getTargetTime()-timeOffset);
+			_postRotPlanner.scaleToDuration(_postCirclePlanner.getTargetTime()-_rotTimeOffset);
 		}
-		_isPostPlannerPlanned = true;
+		_isPostPlanned = true;
 	}
 
 
@@ -2820,7 +2820,7 @@ SWITCH_PLANNERS://-------------------------------------------------
 	_rotPtr = &_prevRotPlanner;
 	_tracPtr = &_prevCirclePlanner;
 	_plannerState = PLANNER_MOVING;
-	_isPostPlannerPlanned = false;
+	_isPostPlanned = false;
 	DUMP_INFORM("Moving Circle ... \n");
 
 	return PLANNER_SUCCEED;
