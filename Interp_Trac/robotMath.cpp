@@ -122,14 +122,37 @@ double headingDirectionIn2D(double vxy[2],double _default)
 
 double headingAngularVelIn2D(double vxy[2], double axy[2])
 {
-	if (normN(vxy,2) < ACCURACY_FACTOR)
+	if (normN(vxy,2)*normN(vxy,2) < ALMOST_ZERO)
 	{
 		return 0.0;
 	}
 
-	double K = axy[1]*vxy[0] - vxy[1]*axy[0];
-	
-	return K/normN(vxy,2);
+	double tmp[3] = {0};
+	double v[3] = {vxy[0],vxy[1],0};
+	double a[3] = {axy[0],axy[1],0};
+
+	cross3(tmp,v,a);
+
+	double ret = norm3(tmp)/(norm3(v)*norm3(v));
+
+	ret = sign(tmp[2])*ret;
+
+	return ret;
+}
+
+double headingAngularAccIn2D(double vxy[2], double axy[2])
+{
+	if (normN(vxy,2)*normN(vxy,2) < ALMOST_ZERO)
+	{
+		return 0.0;
+	}
+
+	double v[3] = {vxy[0],vxy[1],0};
+	double a[3] = {axy[0],axy[1],0};
+
+	double tmp = headingAngularVelIn2D(vxy,axy);
+
+	return dot3(a,v)*tmp/(norm3(v)*norm3(v));
 }
 
 

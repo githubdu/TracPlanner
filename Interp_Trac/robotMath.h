@@ -75,6 +75,9 @@ double headingDirectionIn2D(double vxy[2],double _default);
 /// get the turning velocity from velocity vector in 2D
 double headingAngularVelIn2D(double vxy[2], double axy[2]);
 
+/// get the turning acceleration from velocity vector in 2D
+double headingAngularAccIn2D(double vxy[2], double axy[2]);
+
 
 
 

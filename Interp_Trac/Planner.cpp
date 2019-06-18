@@ -379,16 +379,30 @@ int Planner6D::updateCurrentPos(double currentPos[], double refTool[])
 int Planner6D::_transferAccToFlange(double nextVel[6], double nextAcc[6])
 {
 	double direc[3] = {0};
-	double tracAccInTool[3] = {0};
+	double tracAccTanInTool[3] = {0};
 	_lastTracRefToolInv.getPos(direc);
 
-	cross3(tracAccInTool,nextAcc+TRANS_D ,direc);
+	cross3(tracAccTanInTool,nextAcc+TRANS_D ,direc);
 
-	double tmpOmega = normN(nextVel+TRANS_D,ROTATE_D);
-	double tmpNorm = dotN(nextVel+TRANS_D,direc,ROTATE_D);
-	tracAccInTool[0] += tmpNorm*nextVel[0+TRANS_D] - tmpOmega*tmpOmega*direc[0];
-	tracAccInTool[1] += tmpNorm*nextVel[1+TRANS_D] - tmpOmega*tmpOmega*direc[1];
-	tracAccInTool[2] += tmpNorm*nextVel[2+TRANS_D] - tmpOmega*tmpOmega*direc[2];
+	//----------------------------------------------------------------------------
+
+	//double tmpOmega = normN(nextVel+TRANS_D,ROTATE_D);
+	//double tmpNorm = dotN(nextVel+TRANS_D,direc,ROTATE_D);
+	//tracAccInTool[0] += tmpNorm*nextVel[0+TRANS_D] - tmpOmega*tmpOmega*direc[0];
+	//tracAccInTool[1] += tmpNorm*nextVel[1+TRANS_D] - tmpOmega*tmpOmega*direc[1];
+	//tracAccInTool[2] += tmpNorm*nextVel[2+TRANS_D] - tmpOmega*tmpOmega*direc[2];
+
+	// or
+	double tracVelNormInTool[3] = {0};
+	double tracAccNormInTool[3] = {0};
+	cross3(tracVelNormInTool,nextVel+TRANS_D,direc);
+	cross3(tracAccNormInTool,nextVel+TRANS_D,tracVelNormInTool);
+
+	double tracAccInTool[3] = {0};
+	tracAccInTool[0] = tracAccTanInTool[0] + tracAccNormInTool[0];
+	tracAccInTool[1] = tracAccTanInTool[1] + tracAccNormInTool[1];
+	tracAccInTool[2] = tracAccTanInTool[2] + tracAccNormInTool[2];
+	//----------------------------------------------------------------------------
 
 	double matrix[3][3] = {{0}};
 	rpy2matrix(matrix,_lastTracTargetTcpPos+TRANS_D);
@@ -1861,16 +1875,30 @@ int PlannerAgv::updateCurrentPos(double currentPos[], double refTool[])
 int PlannerAgv::_transferAccToFlange(double nextVel[6], double nextAcc[6])
 {
 	double direc[3] = {0};
-	double tracAccInTool[3] = {0};
+	double tracAccTanInTool[3] = {0};
 	_lastTracRefToolInv.getPos(direc);
 
-	cross3(tracAccInTool,nextAcc+TRANS_D ,direc);
+	cross3(tracAccTanInTool,nextAcc+TRANS_D ,direc);
 
-	double tmpOmega = normN(nextVel+TRANS_D,ROTATE_D);
-	double tmpNorm = dotN(nextVel+TRANS_D,direc,ROTATE_D);
-	tracAccInTool[0] += tmpNorm*nextVel[0+TRANS_D] - tmpOmega*tmpOmega*direc[0];
-	tracAccInTool[1] += tmpNorm*nextVel[1+TRANS_D] - tmpOmega*tmpOmega*direc[1];
-	tracAccInTool[2] += tmpNorm*nextVel[2+TRANS_D] - tmpOmega*tmpOmega*direc[2];
+	//----------------------------------------------------------------------------
+
+	//double tmpOmega = normN(nextVel+TRANS_D,ROTATE_D);
+	//double tmpNorm = dotN(nextVel+TRANS_D,direc,ROTATE_D);
+	//tracAccInTool[0] += tmpNorm*nextVel[0+TRANS_D] - tmpOmega*tmpOmega*direc[0];
+	//tracAccInTool[1] += tmpNorm*nextVel[1+TRANS_D] - tmpOmega*tmpOmega*direc[1];
+	//tracAccInTool[2] += tmpNorm*nextVel[2+TRANS_D] - tmpOmega*tmpOmega*direc[2];
+
+	// or
+	double tracVelNormInTool[3] = {0};
+	double tracAccNormInTool[3] = {0};
+	cross3(tracVelNormInTool,nextVel+TRANS_D,direc);
+	cross3(tracAccNormInTool,nextVel+TRANS_D,tracVelNormInTool);
+
+	double tracAccInTool[3] = {0};
+	tracAccInTool[0] = tracAccTanInTool[0] + tracAccNormInTool[0];
+	tracAccInTool[1] = tracAccTanInTool[1] + tracAccNormInTool[1];
+	tracAccInTool[2] = tracAccTanInTool[2] + tracAccNormInTool[2];
+	//----------------------------------------------------------------------------
 
 	double matrix[3][3] = {{0}};
 	rpy2matrix(matrix,_lastTracTargetTcpPos+TRANS_D);
@@ -1958,22 +1986,24 @@ int PlannerAgv::_getTarget(double nextPos[], double nextVel[], double nextAcc[])
 	nextVel[TARGET_X] = tmpVel[0]; nextVel[TARGET_Y] = tmpVel[1];nextVel[TARGET_A] = tmpVel[ROT_INDEX];
 	nextAcc[TARGET_X] = tmpAcc[0]; nextAcc[TARGET_Y] = tmpAcc[1];nextAcc[TARGET_A] = tmpAcc[ROT_INDEX];
 	
-	nextVel[TARGET_W] = headingAngularVelIn2D(nextVel,nextAcc);
-	nextAcc[TARGET_W] = 0.0;// ignored ...
-	
 	switch(_tracType)
 	{
 	case PURE_TURNING:
+		nextAcc[TARGET_W] = _turningPlanner.acc(_plannerStartTime);
 		nextVel[TARGET_W] = _turningPlanner.vel(_plannerStartTime);
 		nextPos[TARGET_W] = radDistance(0,_turningPlanner.pos(_plannerStartTime));
 		break;
 
 	case PURE_BLENDING:
+		nextVel[TARGET_W] = headingAngularVelIn2D(nextVel,nextAcc);
+		nextAcc[TARGET_W] = headingAngularAccIn2D(nextVel,nextAcc);
 		nextPos[TARGET_W] = headingDirectionIn2D(nextVel,_lastTracTargetTurnOfFlange);
 		break;
 
 	case NORMAL_TRAC:
 	case PURE_ROTATING:
+		nextVel[TARGET_W] = headingAngularVelIn2D(nextVel,nextAcc);
+		nextAcc[TARGET_W] = headingAngularAccIn2D(nextVel,nextAcc);
 		nextPos[TARGET_W] = headingDirectionIn2D(nextVel,_lastTracTargetTurnOfFlange);
 		break;
 	}
@@ -1987,32 +2017,53 @@ int PlannerAgv::_getTarget(double nextPos[], double nextVel[], double nextAcc[])
 
 int PlannerAgv::_getTargetTurnOfFlange(double&targetTurn, TRAC* tPtr, TRAC* rPtr)
 {
+	double tmpTurn = 0;
 	double nextPos[6] = {0};
 	double nextVel[6] = {0};
 
-	tPtr->pos(TIME_SCALE_MS/1000.0,nextPos);
-	tPtr->vel(TIME_SCALE_MS/1000.0,nextVel);
+	int time = TIME_SCALE_MS;
 
-	rPtr->pos(TIME_SCALE_MS/1000.0,nextPos+TRANS_D);
-	rPtr->vel(TIME_SCALE_MS/1000.0,nextVel+TRANS_D);
+	while(time > 0)
+	{
+		tPtr->pos(time/1000.0,nextPos);
+		tPtr->vel(time/1000.0,nextVel);
 
-	double direc[3] = {0};
-	double tracVelInTool[3] = {0};
-	_lastTracRefToolInv.getPos(direc);
+		rPtr->pos(time/1000.0,nextPos+TRANS_D);
+		rPtr->vel(time/1000.0,nextVel+TRANS_D);
 
-	cross3(tracVelInTool,nextVel+TRANS_D ,direc);
+		double direc[3] = {0};
+		double tracVelInTool[3] = {0};
+		_lastTracRefToolInv.getPos(direc);
 
-	double matrix[3][3] = {{0}};
-	rpy2matrix(matrix,nextPos+TRANS_D);
+		cross3(tracVelInTool,nextVel+TRANS_D ,direc);
 
-	double tracVelInWord[3] = {0};
-	M3p3(tracVelInWord,matrix,tracVelInTool);
+		double matrix[3][3] = {{0}};
+		rpy2matrix(matrix,nextPos+TRANS_D);
 
-	nextVel[0] += tracVelInWord[0];
-	nextVel[1] += tracVelInWord[1];
-	nextVel[2] += tracVelInWord[2];
+		double tracVelInWord[3] = {0};
+		M3p3(tracVelInWord,matrix,tracVelInTool);
 
-	targetTurn = headingDirectionIn2D(nextVel,_lastTracTargetTurnOfFlange);
+		nextVel[0] += tracVelInWord[0];
+		nextVel[1] += tracVelInWord[1];
+		nextVel[2] += tracVelInWord[2];
+
+		if (time == TIME_SCALE_MS)
+		{
+			tmpTurn = headingDirectionIn2D(nextVel,_lastTracTargetTurnOfFlange);
+		}
+		else
+		{
+			tmpTurn = headingDirectionIn2D(nextVel,targetTurn);
+		}
+
+		if (ABS(tmpTurn - targetTurn) < ALMOST_ZERO)
+		{
+			break;
+		}
+
+		time -= PLAN_CYCLE;	
+		targetTurn = tmpTurn;
+	}
 
 	return PLANNER_SUCCEED;
 }
