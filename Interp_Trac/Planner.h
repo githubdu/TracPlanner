@@ -326,6 +326,7 @@ protected:
 	double      _tracAccLimit;
 	double		_tracJerkLimit;
 
+	double		_rotTimeBurr;
 	double      _rotTimeOffset;
 	double		_plannerStartTime;
 	double		_plannerSwitchTime;
@@ -436,6 +437,7 @@ private:
 	double      _tracAccLimit;
 	double		_tracJerkLimit;
 
+	double		_rotTimeBurr;
 	double      _rotTimeOffset;
 	double		_plannerStartTime;
 	double		_plannerSwitchTime;

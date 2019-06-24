@@ -39,35 +39,23 @@
 
 
 #define ALMOST_ZERO		(1E-15)
-#define ACCURACY_FACTOR	(1E-5)
+#define ACCURACY_FACTOR	(1E-05)
+
+#define	ROT_INDEX		(5)
 
 #define	PLAN_CYCLE		(2)	
 
 #define ZONE_RATIO		(0)
 #define ZONE_LENGTH		(1)
-#define MIN_ZONE		(1E-2)
+#define MIN_ZONE_SIZE	(1E-2)
 
 #define MAX_DOF			(10)
 #define POINTS_MAX_NUM	(128)
-#define DATA_FILE_LEN	(1024)
-
-#define NEGATIVE		(0)
-#define POSITIVE		(1)
-
-#define	ROT_INDEX		(5)
 
 #define ERR_REP_NOTYET	(100)
 #define ERR_REP_FAILED	(101)
-
 #define ERR_PLAN_FAILED	(200)
 
-
-enum rotTyp
-{
-	rotRPY			= 0,
-	rotZYX			= 1,
-	rotZYZ			= 2
-};
 
 enum trcTyp
 {

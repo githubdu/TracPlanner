@@ -54,7 +54,7 @@ int Planner6D::stop()
 			{
 				return ERR_PLAN_FAILED;
 			}
-			if(!_rotPtr->stopTrajectory(_plannerStartTime))
+			if(!_rotPtr->stopTrajectory(_plannerStartTime-_rotTimeBurr))
 			{
 				return ERR_PLAN_FAILED;
 			}
@@ -126,11 +126,13 @@ int Planner6D::initiate()
 	_rotPtr = nullptr;
 	_tracPtr = nullptr;
 
+	_rotTimeBurr = 0;
+	_rotTimeOffset = 0;
 	_plannerStartTime = 0;
 	_plannerSwitchTime = 0;
 
-	_isNowInJointSpace = false;
 	_isPostPlanned = false;
+	_isNowInJointSpace = false;
 
 	_plannerState = PLANNER_DONE;
 	_blenderState = PLANNER_NOZONE;
@@ -150,6 +152,8 @@ int Planner6D::wait(double wTime)
 		return PLANNER_NOTYET;
 	}
 
+	_rotTimeBurr = 0;
+	_rotTimeOffset = 0;
 	_plannerStartTime = 0;
 	_plannerSwitchTime = wTime;
 
@@ -200,7 +204,7 @@ int Planner6D::rePlan(double refVel)
 			break;
 
 		case REP_SUCCEED:
-			switch(_rotPtr->rePlanTrajectory(_plannerStartTime,refVel))
+			switch(_rotPtr->rePlanTrajectory(_plannerStartTime-_rotTimeBurr,refVel))
 			{
 			case ERR_REP_NOTYET:
 				return PLANNER_NOTYET;
@@ -473,7 +477,7 @@ int Planner6D::_getTarget(double nextPos[], double nextVel[], double nextAcc[])
 	{
 		if (_rotPtr->isValid())
 		{
-			_rotPtr->move(_plannerStartTime,nextPos+TRANS_D,nextVel+TRANS_D,nextAcc+TRANS_D);
+			_rotPtr->move(_plannerStartTime-_rotTimeBurr,nextPos+TRANS_D,nextVel+TRANS_D,nextAcc+TRANS_D);
 		}
 		else
 		{
@@ -645,6 +649,8 @@ int Planner6D::moveR(double targetPos[], double refVel, double refAcc, double re
 	}
 
 	// update
+	_rotTimeBurr = 0;
+	_rotTimeOffset = 0;
 	_plannerStartTime = 0;
 	_blendPlanner.initiate();
 	_isNowInJointSpace = false;
@@ -707,6 +713,8 @@ int Planner6D::moveJ(double targetJoint[], double refVel, double refAcc, double 
 	_isNowInJointSpace = true;
 	_blendPlanner.initiate();
 	_plannerStartTime = 0;
+	_rotTimeOffset = 0;
+	_rotTimeBurr = 0;
 	
 	return PLANNER_SUCCEED;
 }
@@ -777,7 +785,6 @@ PLAN_NEXT_MOTION://------------------------------------------------
 		_rotTimeOffset = _blendPlanner.getPostTime();
 
 		// plan rotate
-		double time[POINTS_MAX_NUM] = {0};
 		double targetR[POINTS_MAX_NUM][ROTATE_D] = {{0}};
 		if (_rotPtr != nullptr)
 		{
@@ -787,10 +794,8 @@ PLAN_NEXT_MOTION://------------------------------------------------
 		{
 			memcpy(targetR[0],_lastTracTargetTcpPos+TRANS_D,sizeof(double)*ROTATE_D);
 		}
-		_postBsplinePlanner.getTimeSequence(time);
 		for (int i=1; i<=pointsNum; i++)
 		{
-			time[i] = time[i] + _rotTimeOffset;
 			memcpy(targetR[i],targetPos[i-1]+TRANS_D,sizeof(double)*ROTATE_D);
 			if (rel)
 			{
@@ -803,7 +808,14 @@ PLAN_NEXT_MOTION://------------------------------------------------
 				matrix2rpy(targetR[i],tM);
 			}
 		}
+
+		// start later, finish early
+		double time[POINTS_MAX_NUM] = {0};
+		_postBsplinePlanner.getTimeSequence(time);
+
 		time[0] += _rotTimeOffset;
+		time[pointsNum] -= _rotTimeOffset;
+
 		_postMultiRotPlanner.initiate();
 		_postMultiRotPlanner.setLimit(refVel*_rotVelLimit,_rotAccLimit,_rotJerkLimit);
 		_postMultiRotPlanner.planTrajectory(time,pointsNum+1,targetR);
@@ -816,10 +828,9 @@ PLAN_NEXT_MOTION://------------------------------------------------
 		if (_postMultiRotPlanner.isTimeChanged())
 		{
 			_postMultiRotPlanner.getTimeSequence(time);
-			for (int i=0; i<pointsNum+1; i++)
-			{
-				time[i] -= _rotTimeOffset;
-			}
+			time[0] -= _rotTimeOffset;
+			time[pointsNum] += _rotTimeOffset;
+
 			_postBsplinePlanner.planTrajectory(time,targetP,pointsNum+1);
 			if (!_postBsplinePlanner.isValid())
 			{
@@ -844,11 +855,12 @@ PLAN_NEXT_MOTION://------------------------------------------------
 SWITCH_PLANNERS://-------------------------------------------------
 	if (_blendPlanner.getPostTrac() != nullptr && nullptr != _blendPlanner.getPrevTrac())
 	{
-		double burr = _plannerStartTime - _blendPlanner.getTargetTime();
-		_plannerStartTime = _rotTimeOffset + burr;
+		_rotTimeBurr = _plannerStartTime - _blendPlanner.getTargetTime();
+		_plannerStartTime = _rotTimeOffset + _rotTimeBurr;
 	}
 	else
 	{
+		_rotTimeBurr = 0;
 		_plannerStartTime = 0;
 	}
 	_prevMultiRotPlanner = _postMultiRotPlanner;
@@ -868,8 +880,8 @@ SWITCH_PLANNERS://-------------------------------------------------
 
 
 //UPDATE_STATE:----------------------------------------------------
-	_isNowInJointSpace = false;
 	_isPostPlanned = false;
+	_isNowInJointSpace = false;
 	_plannerState = PLANNER_MOVING;
 	_rotPtr = &_prevMultiRotPlanner;
 	_tracPtr = &_prevBsplinePlanner;
@@ -962,11 +974,11 @@ PLAN_NEXT_MOTION://------------------------------------------------
 		}
 
 		// synchronize
-		if (_postRotPlanner.getTargetTime() > _postLinePlanner.getTargetTime())
+		if (_postRotPlanner.getTargetTime() + _rotTimeOffset > _postLinePlanner.getTargetTime())
 		{
-			_postLinePlanner.scaleToDuration(_postRotPlanner.getDuration()+_rotTimeOffset);
+			_postLinePlanner.scaleToDuration(_postRotPlanner.getDuration() + _rotTimeOffset);
 		}
-		if (_postLinePlanner.getTargetTime() > _postRotPlanner.getTargetTime())
+		if (_postLinePlanner.getTargetTime() - _rotTimeOffset > _postRotPlanner.getTargetTime())
 		{
 			_postRotPlanner.scaleToDuration(_postLinePlanner.getDuration() - _rotTimeOffset);
 		}
@@ -982,11 +994,12 @@ PLAN_NEXT_MOTION://------------------------------------------------
 SWITCH_PLANNERS://-------------------------------------------------
 	if (_blendPlanner.getPostTrac() != nullptr && nullptr != _blendPlanner.getPrevTrac() )
 	{
-		double burr = _plannerStartTime - _blendPlanner.getTargetTime();
-		_plannerStartTime = _rotTimeOffset + burr;
+		_rotTimeBurr = _plannerStartTime - _blendPlanner.getTargetTime();
+		_plannerStartTime = _rotTimeOffset + _rotTimeBurr;
 	}
 	else
 	{
+		_rotTimeBurr = 0;
 		_plannerStartTime = 0;
 	}
 	_prevLinePlanner = _postLinePlanner;
@@ -1005,10 +1018,10 @@ SWITCH_PLANNERS://-------------------------------------------------
 
 
 //UPDATE_STATE:-------------------------------------------------
+	_isPostPlanned = false;
 	_isNowInJointSpace = false;
 	_rotPtr = &_prevRotPlanner;
 	_tracPtr = &_prevLinePlanner;
-	_isPostPlanned = false;
 	_plannerState = PLANNER_MOVING;
 	DUMP_INFORM("Moving Line ... \n");
 	return PLANNER_SUCCEED;
@@ -1101,13 +1114,13 @@ PLAN_NEXT_MOTION://-------------------------------------------------
 		}
 
 		// synchronize
-		if (_postRotPlanner.getTargetTime() > _postCirclePlanner.getTargetTime())
+		if (_postRotPlanner.getTargetTime() + _rotTimeOffset > _postCirclePlanner.getTargetTime())
 		{
-			_postCirclePlanner.scaleToDuration(_postRotPlanner.getDuration()+_rotTimeOffset);
+			_postCirclePlanner.scaleToDuration(_postRotPlanner.getDuration() + _rotTimeOffset);
 		}
-		if (_postCirclePlanner.getTargetTime() > _postRotPlanner.getTargetTime())
+		if (_postCirclePlanner.getTargetTime() - _rotTimeOffset > _postRotPlanner.getTargetTime())
 		{
-			_postRotPlanner.scaleToDuration(_postCirclePlanner.getTargetTime()-_rotTimeOffset);
+			_postRotPlanner.scaleToDuration(_postCirclePlanner.getTargetTime() - _rotTimeOffset);
 		}
 		_isPostPlanned = true;
 	}
@@ -1121,11 +1134,12 @@ PLAN_NEXT_MOTION://-------------------------------------------------
 SWITCH_PLANNERS://-------------------------------------------------
 	if (_blendPlanner.getPostTrac() != nullptr && nullptr != _blendPlanner.getPrevTrac())
 	{
-		double burr = _plannerStartTime - _blendPlanner.getTargetTime();
-		_plannerStartTime = _rotTimeOffset + burr;
+		_rotTimeBurr = _plannerStartTime - _blendPlanner.getTargetTime();
+		_plannerStartTime = _rotTimeOffset + _rotTimeBurr;
 	}
 	else
 	{
+		_rotTimeBurr = 0;
 		_plannerStartTime = 0;
 	}
 	_prevCirclePlanner = _postCirclePlanner;
@@ -1144,9 +1158,9 @@ SWITCH_PLANNERS://-------------------------------------------------
 
 
 //UPDATE_STATE:-------------------------------------------------
+	_isPostPlanned = false;
 	_isNowInJointSpace = false;
 	_rotPtr = &_prevRotPlanner;
-	_isPostPlanned = false;
 	_tracPtr = &_prevCirclePlanner;
 	_plannerState = PLANNER_MOVING;
 	DUMP_INFORM("Moving Circle ... \n");
@@ -1224,13 +1238,13 @@ PLAN_NEXT_MOTION://-------------------------------------------------
 		}
 
 		// synchronize
-		if (_postRotPlanner.getTargetTime() > _postCirclePlanner.getTargetTime())
+		if (_postRotPlanner.getTargetTime() + _rotTimeOffset > _postCirclePlanner.getTargetTime())
 		{
-			_postCirclePlanner.scaleToDuration(_postRotPlanner.getDuration()+_rotTimeOffset);
+			_postCirclePlanner.scaleToDuration(_postRotPlanner.getDuration() + _rotTimeOffset);
 		}
-		if (_postCirclePlanner.getTargetTime() > _postRotPlanner.getTargetTime())
+		if (_postCirclePlanner.getTargetTime() - _rotTimeOffset > _postRotPlanner.getTargetTime())
 		{
-			_postRotPlanner.scaleToDuration(_postCirclePlanner.getTargetTime()-_rotTimeOffset);
+			_postRotPlanner.scaleToDuration(_postCirclePlanner.getTargetTime() - _rotTimeOffset);
 		}
 		_isPostPlanned = true;
 	}
@@ -1244,11 +1258,12 @@ PLAN_NEXT_MOTION://-------------------------------------------------
 SWITCH_PLANNERS://-------------------------------------------------
 	if (_blendPlanner.getPostTrac() != nullptr && nullptr != _blendPlanner.getPrevTrac())
 	{
-		double burr = _plannerStartTime - _blendPlanner.getTargetTime();
-		_plannerStartTime = _blendPlanner.getPostTime() + burr;
+		_rotTimeBurr = _plannerStartTime - _blendPlanner.getTargetTime();
+		_plannerStartTime = _blendPlanner.getPostTime() + _rotTimeBurr;
 	}
 	else
 	{
+		_rotTimeBurr = 0;
 		_plannerStartTime = 0;
 	}
 	_prevCirclePlanner = _postCirclePlanner;
@@ -1267,9 +1282,9 @@ SWITCH_PLANNERS://-------------------------------------------------
 
 
 //UPDATE_STATE:-------------------------------------------------
+	_isPostPlanned = false;
 	_isNowInJointSpace = false;
 	_rotPtr = &_prevRotPlanner;
-	_isPostPlanned = false;
 	_tracPtr = &_prevCirclePlanner;
 	_plannerState = PLANNER_MOVING;
 	DUMP_INFORM("Moving Circle ... \n");
@@ -1354,7 +1369,7 @@ STOP_TRAC_PLANNER:
 	{
 		return ERR_PLAN_FAILED;
 	}
-	if(!_rotPtr->stopTrajectory(_plannerStartTime))
+	if(!_rotPtr->stopTrajectory(_plannerStartTime-_rotTimeBurr))
 	{
 		return ERR_PLAN_FAILED;
 	}
@@ -1421,7 +1436,7 @@ int PlannerAgv::_moveZ()
 	}
 
 	// turning direction
-	if (zBlend <= MIN_ZONE || blendDuration < TIME_SCALE_MS/1000.0 || tracDuration < 2.0*TIME_SCALE_MS/1000.0)
+	if (zBlend <= MIN_ZONE_SIZE || blendDuration < TIME_SCALE_MS/1000.0 || tracDuration < 2.0*TIME_SCALE_MS/1000.0)
 	{
 		double p0 = _lastTracTargetTurnOfFlange;
 		double pf = p0 + radDistance(p0, _targetTurnOfNextMotionOfFlange);
@@ -1480,6 +1495,7 @@ int PlannerAgv::initiate()
 	_rotPtr = nullptr;
 	_tracPtr = nullptr;
 
+	_rotTimeBurr = 0;
 	_rotTimeOffset = 0;
 	_plannerStartTime = 0;
 	_plannerSwitchTime = 0;
@@ -1541,6 +1557,8 @@ int PlannerAgv::_prepareTurning()
 	}
 
 	// update
+	_rotTimeBurr = 0;
+	_rotTimeOffset = 0;
 	_plannerStartTime = 0;
 	_blendPlanner.initiate();
 	_tracType = PURE_TURNING;
@@ -1561,6 +1579,8 @@ int PlannerAgv::wait(double wTime)
 		return PLANNER_NOTYET;
 	}
 
+	_rotTimeBurr = 0;
+	_rotTimeOffset = 0;
 	_plannerStartTime = 0;
 	_plannerSwitchTime = wTime;
 	_plannerState = PLANNER_WAITING;
@@ -1628,7 +1648,7 @@ int PlannerAgv::rePlan(double refVel)
 	if (_plannerState == PLANNER_MOVING)
 	{
 		if (   !_tracPtr->isInCruisingPhase(_plannerStartTime) 
-			|| !_rotPtr->isInCruisingPhase(_plannerStartTime))
+			|| !_rotPtr->isInCruisingPhase(_plannerStartTime-_rotTimeBurr))
 		{   
 			return PLANNER_NOTYET;// rePlan in cruising phase only
 		}
@@ -1640,7 +1660,7 @@ int PlannerAgv::rePlan(double refVel)
 			break;
 
 		case REP_SUCCEED:
-			switch(_rotPtr->rePlanTrajectory(_plannerStartTime,refVel))
+			switch(_rotPtr->rePlanTrajectory(_plannerStartTime-_rotTimeBurr,refVel))
 			{
 			case ERR_REP_NOTYET:
 				return PLANNER_NOTYET;
@@ -1648,7 +1668,7 @@ int PlannerAgv::rePlan(double refVel)
 
 			case REP_SUCCEED:
 				// synchronize
-				if (   _rotPtr->getTargetTime() - _plannerStartTime > TIME_SCALE_MS / 1000.0 
+				if (   _rotPtr->getTargetTime() - _plannerStartTime + _rotTimeBurr > TIME_SCALE_MS / 1000.0 
 					|| _tracPtr->getTargetTime() - _plannerStartTime > 2.0*TIME_SCALE_MS / 1000.0)
 				{
 					if (_rotPtr->getTargetTime() + TIME_SCALE_MS / 1000.0 >  _tracPtr->getTargetTime())
@@ -1953,7 +1973,7 @@ int PlannerAgv::_getTarget(double nextPos[], double nextVel[], double nextAcc[])
 	{
 		if (_rotPtr->isValid())
 		{
-			_rotPtr->move(_plannerStartTime,tmpPos+TRANS_D,tmpVel+TRANS_D,tmpAcc+TRANS_D);
+			_rotPtr->move(_plannerStartTime - _rotTimeBurr,tmpPos+TRANS_D,tmpVel+TRANS_D,tmpAcc+TRANS_D);
 		}
 		else
 		{
@@ -2239,12 +2259,14 @@ PLAN_NEXT_MOTION://-------------------------------------------------
 		}
 		_postBsplinePlanner.getTimeSequence(time);
 
-		time[0] = time[0] + _rotTimeOffset;
 		rotAxis[0][ROT_INDEX-TRANS_D] = 1.0;
 		deltaA[0] = radDistance(sA[ROT_INDEX-TRANS_D],targetPos[0][TARGET_A]);
+		if (rel)
+		{
+			deltaA[0] = targetPos[0][TARGET_A];
+		}
 		for (int i=1; i<pNum; i++)
 		{
-			time[i] = time[i] + _rotTimeOffset;
 			rotAxis[i][ROT_INDEX-TRANS_D] = 1.0;
 			deltaA[i] = radDistance(targetPos[i-1][TARGET_A], targetPos[i][TARGET_A]);
 
@@ -2253,7 +2275,10 @@ PLAN_NEXT_MOTION://-------------------------------------------------
 				deltaA[i] = targetPos[i][TARGET_A];
 			}
 		}
+
 		time[0] += _rotTimeOffset;
+		time[pNum] -= _rotTimeOffset;
+
 		_postMultiRotPlanner.initiate();
 		_postMultiRotPlanner.setLimit(refVel*_rotVelLimit,_rotAccLimit,_rotJerkLimit);
 
@@ -2267,10 +2292,9 @@ PLAN_NEXT_MOTION://-------------------------------------------------
 		if (_postMultiRotPlanner.isTimeChanged())
 		{
 			_postMultiRotPlanner.getTimeSequence(time);
-			for (int i=0; i<pNum+1; i++)
-			{
-				time[i] -= _rotTimeOffset;
-			}
+			time[0] -= _rotTimeOffset;
+			time[pNum] += _rotTimeOffset;
+
 			_postBsplinePlanner.planTrajectory(time,targetP,pNum+1);
 			if (!_postBsplinePlanner.isValid())
 			{
@@ -2300,11 +2324,12 @@ PLAN_NEXT_MOTION://-------------------------------------------------
 SWITCH_PLANNERS://-------------------------------------------------
 	if (_blendPlanner.getPostTrac() != nullptr && nullptr != _blendPlanner.getPrevTrac())
 	{
-		double burr = _plannerStartTime - _blendPlanner.getTargetTime();
-		_plannerStartTime = _blendPlanner.getPostTime() + burr;
+		_rotTimeBurr = _plannerStartTime - _blendPlanner.getTargetTime();
+		_plannerStartTime = _blendPlanner.getPostTime() + _rotTimeBurr;
 	}
 	else
 	{
+		_rotTimeBurr = 0;
 		_plannerStartTime = 0;
 	}
 	_prevMultiRotPlanner = _postMultiRotPlanner;
@@ -2324,8 +2349,8 @@ SWITCH_PLANNERS://-------------------------------------------------
 
 
 //UPDATE_STATE:-------------------------------------------------
-	_tracType = NORMAL_TRAC;
 	_isPostPlanned = false;
+	_tracType = NORMAL_TRAC;
 	_plannerState = PLANNER_MOVING;
 	_rotPtr = &_prevMultiRotPlanner;
 	_tracPtr = &_prevBsplinePlanner;
@@ -2425,15 +2450,16 @@ SWITCH_PLANNERS://-------------------------------------------------
 	_prevRotPlanner = _postRotPlanner;
 	_blendPlanner.initiate();
 	_plannerStartTime = 0;
+	_rotTimeOffset = 0;
+	_rotTimeBurr = 0;
 
 
 //UPDATE_STATE:-------------------------------------------------
-	_plannerStartTime = 0;
+	_isPostPlanned = false;
 	_blendPlanner.initiate();
 	_tracType = PURE_ROTATING;
 	_rotPtr = &_prevRotPlanner;
 	_tracPtr = &_prevLinePlanner;
-	_isPostPlanned = false;
 	_plannerState = PLANNER_MOVING;
 	DUMP_INFORM("Moving rotate ... \n");
 	return PLANNER_SUCCEED;
@@ -2517,11 +2543,11 @@ PLAN_NEXT_MOTION://-------------------------------------------------
 		}
 
 		// synchronize
-		if (_postRotPlanner.getTargetTime() > _postLinePlanner.getTargetTime())
+		if (_postRotPlanner.getTargetTime() + _rotTimeOffset > _postLinePlanner.getTargetTime())
 		{
-			_postLinePlanner.scaleToDuration(_postRotPlanner.getDuration()+_rotTimeOffset);
+			_postLinePlanner.scaleToDuration(_postRotPlanner.getDuration() + _rotTimeOffset);
 		}
-		if (_postLinePlanner.getTargetTime() > _postRotPlanner.getTargetTime())
+		if (_postLinePlanner.getTargetTime() - _rotTimeOffset > _postRotPlanner.getTargetTime())
 		{
 			_postRotPlanner.scaleToDuration(_postLinePlanner.getDuration() - _rotTimeOffset);
 		}
@@ -2548,11 +2574,12 @@ PLAN_NEXT_MOTION://-------------------------------------------------
 SWITCH_PLANNERS://-------------------------------------------------
 	if (_blendPlanner.getPostTrac() != nullptr && nullptr != _blendPlanner.getPrevTrac() )
 	{
-		double burr = _plannerStartTime - _blendPlanner.getTargetTime();
-		_plannerStartTime = _blendPlanner.getPostTime() + burr;
+		_rotTimeBurr = _plannerStartTime - _blendPlanner.getTargetTime();
+		_plannerStartTime = _blendPlanner.getPostTime() + _rotTimeBurr;
 	}
 	else
 	{
+		_rotTimeBurr = 0;
 		_plannerStartTime = 0;
 	}
 	_prevLinePlanner = _postLinePlanner;
@@ -2571,11 +2598,11 @@ SWITCH_PLANNERS://-------------------------------------------------
 
 
 //UPDATE_STATE:-------------------------------------------------
+	_isPostPlanned = false;
 	_tracType = NORMAL_TRAC;
 	_rotPtr = &_prevRotPlanner;
 	_tracPtr = &_prevLinePlanner;
 	_plannerState = PLANNER_MOVING;
-	_isPostPlanned = false;
 	DUMP_INFORM("Moving Line ... \n");
 
 	return PLANNER_SUCCEED;
@@ -2666,13 +2693,13 @@ PLAN_NEXT_MOTION://-------------------------------------------------
 		}
 
 		// synchronize
-		if (_postRotPlanner.getTargetTime() > _postCirclePlanner.getTargetTime())
+		if (_postRotPlanner.getTargetTime() + _rotTimeOffset > _postCirclePlanner.getTargetTime())
 		{
-			_postCirclePlanner.scaleToDuration(_postRotPlanner.getDuration()+_rotTimeOffset);
+			_postCirclePlanner.scaleToDuration(_postRotPlanner.getDuration() + _rotTimeOffset);
 		}
-		if (_postCirclePlanner.getTargetTime() > _postRotPlanner.getTargetTime())
+		if (_postCirclePlanner.getTargetTime() - _rotTimeOffset > _postRotPlanner.getTargetTime())
 		{
-			_postRotPlanner.scaleToDuration(_postCirclePlanner.getTargetTime()-_rotTimeOffset);
+			_postRotPlanner.scaleToDuration(_postCirclePlanner.getTargetTime() - _rotTimeOffset);
 		}
 		_isPostPlanned = true;
 	}
@@ -2697,11 +2724,12 @@ PLAN_NEXT_MOTION://-------------------------------------------------
 SWITCH_PLANNERS://-------------------------------------------------
 	if (_blendPlanner.getPostTrac() != nullptr && nullptr != _blendPlanner.getPrevTrac())
 	{
-		double burr = _plannerStartTime - _blendPlanner.getTargetTime();
-		_plannerStartTime = _blendPlanner.getPostTime() + burr;
+		_rotTimeBurr = _plannerStartTime - _blendPlanner.getTargetTime();
+		_plannerStartTime = _blendPlanner.getPostTime() + _rotTimeBurr;
 	}
 	else
 	{
+		_rotTimeBurr = 0;
 		_plannerStartTime = 0;
 	}
 	_prevCirclePlanner = _postCirclePlanner;
@@ -2720,11 +2748,11 @@ SWITCH_PLANNERS://-------------------------------------------------
 
 
 //UPDATE_STATE:-------------------------------------------------
+	_isPostPlanned = false;
 	_tracType = NORMAL_TRAC;
 	_rotPtr = &_prevRotPlanner;
 	_tracPtr = &_prevCirclePlanner;
 	_plannerState = PLANNER_MOVING;
-	_isPostPlanned = false;
 	DUMP_INFORM("Moving Circle ... \n");
 
 	return PLANNER_SUCCEED;
@@ -2813,13 +2841,13 @@ PLAN_NEXT_MOTION://-------------------------------------------------
 		}
 
 		// synchronize
-		if (_postRotPlanner.getTargetTime() > _postCirclePlanner.getTargetTime())
+		if (_postRotPlanner.getTargetTime() + _rotTimeOffset > _postCirclePlanner.getTargetTime())
 		{
-			_postCirclePlanner.scaleToDuration(_postRotPlanner.getDuration()+_rotTimeOffset);
+			_postCirclePlanner.scaleToDuration(_postRotPlanner.getDuration() + _rotTimeOffset);
 		}
-		if (_postCirclePlanner.getTargetTime() > _postRotPlanner.getTargetTime())
+		if (_postCirclePlanner.getTargetTime() - _rotTimeOffset > _postRotPlanner.getTargetTime())
 		{
-			_postRotPlanner.scaleToDuration(_postCirclePlanner.getTargetTime()-_rotTimeOffset);
+			_postRotPlanner.scaleToDuration(_postCirclePlanner.getTargetTime() - _rotTimeOffset);
 		}
 		_isPostPlanned = true;
 	}
@@ -2844,11 +2872,12 @@ PLAN_NEXT_MOTION://-------------------------------------------------
 SWITCH_PLANNERS://-------------------------------------------------
 	if (_blendPlanner.getPostTrac() != nullptr && nullptr != _blendPlanner.getPrevTrac())
 	{
-		double burr = _plannerStartTime - _blendPlanner.getTargetTime();
-		_plannerStartTime = _blendPlanner.getPostTime() + burr;
+		_rotTimeBurr = _plannerStartTime - _blendPlanner.getTargetTime();
+		_plannerStartTime = _blendPlanner.getPostTime() + _rotTimeBurr;
 	}
 	else
 	{
+		_rotTimeBurr = 0;
 		_plannerStartTime = 0;
 	}
 	_prevCirclePlanner = _postCirclePlanner;
@@ -2867,11 +2896,11 @@ SWITCH_PLANNERS://-------------------------------------------------
 
 
 //UPDATE_STATE:-------------------------------------------------
+	_isPostPlanned = false;
 	_tracType = NORMAL_TRAC;
 	_rotPtr = &_prevRotPlanner;
 	_tracPtr = &_prevCirclePlanner;
 	_plannerState = PLANNER_MOVING;
-	_isPostPlanned = false;
 	DUMP_INFORM("Moving Circle ... \n");
 
 	return PLANNER_SUCCEED;
@@ -3086,7 +3115,7 @@ int PlannerOpt::_getTarget(double nextPos[], double nextVel[], double nextAcc[])
 	{
 		if (_rotPtr->isValid())
 		{
-			_rotPtr->move(_plannerStartTime,nextPos+TRANS_D,nextVel+TRANS_D,nextAcc+TRANS_D);
+			_rotPtr->move(_plannerStartTime - _rotTimeBurr,nextPos+TRANS_D,nextVel+TRANS_D,nextAcc+TRANS_D);
 		}
 		else
 		{
